@@ -1,0 +1,6 @@
+# Repository-level gitignore covering all projects
+
+venv/
+__pycache__/
+*.pyc
+*.env

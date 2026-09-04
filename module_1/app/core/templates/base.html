@@ -8,8 +8,8 @@
 </head>
 <body>
     <nav>
-        <a href="{{ url_for('core.index') }}" 
-        class="{{ 'active' if request.endpoint == 'core.index' else '' }}">Home
+        <a href="{{ url_for('core.home') }}" 
+        class="{{ 'active' if request.endpoint == 'core.home' else '' }}">Home
         </a>
         <a href="{{ url_for('core.contact') }}"
         class="{{ 'active' if request.endpoint == 'core.contact' else '' }}">Contact

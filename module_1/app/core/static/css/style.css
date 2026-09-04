@@ -1,0 +1,98 @@
+/* navigation bar */
+nav {
+    display: flex;
+    justify-content: flex-end;
+    position: fixed;
+    top: 0;
+    right: 0;
+    width: 100%;
+    background-color: #990000;
+    gap: 40px;
+    padding: 10px 20px
+}
+
+/* all links */
+a {
+    text-decoration: none;
+}
+
+/* navigation buttons */
+nav a {
+    color: #FFFFFF;
+    font-family: Georgia, Times, serif;
+    font-size: 16px;
+    display: inline-block;
+    padding: 10px 20px;
+}
+
+/* navigation buttons hover effect */
+nav a:hover {
+    color: #FFCC00;
+    transition: color 0.5s ease;
+}
+
+/* styling for active tab */
+nav a.active {
+    background-color: #790000;
+    border-radius: 20px;
+}
+
+/* inherited text*/
+body {
+    font-family: Helvetica, sans-serif;
+    left: 0;
+    margin: 0;
+    padding: 60px;
+    background-color: #F5F5F5;
+    color: #000000;
+}
+
+/* home page bio section */
+.bio-section {
+    display: flex;
+    align-items: flex-start;
+    gap: 40px
+}
+
+/* home page bio text */
+.bio-text {
+    flex: 1;
+}
+
+/* home page photo grid */
+.photo-grid {
+    display: grid;
+    grid-template-columns: repeat(2, 1fr);
+    grid-auto-rows: 200px;
+    gap: 0;
+    max-width: 500px;
+}
+
+/* home page base photo */
+.photo-grid img {
+    width: 100%;
+    height: 100%;
+    display: block;
+    object-fit: cover;
+}
+
+/* home page image 1 */
+.photo-grid img:nth-child(1) {
+    object-fit: cover;
+    object-position: top;
+}
+
+/* home page image 2 */
+.photo-grid img:nth-child(2) {
+    object-fit: cover;
+}
+
+/* home page image 3 */
+.photo-grid img:nth-child(3) {
+    object-fit: contain;
+}
+
+.contact-info {
+    font-size: 18px;
+    line-height: 2;
+}

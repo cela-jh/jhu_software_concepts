@@ -1,0 +1,24 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <link rel="stylesheet" href="{{ url_for('core.static', filename='css/style.css') }}">
+    <title>{% block title %}Personal Website - Cameron Ela{% endblock %}</title>
+</head>
+<body>
+    <nav>
+        <a href="{{ url_for('core.index') }}" 
+        class="{{ 'active' if request.endpoint == 'core.index' else '' }}">Home
+        </a>
+        <a href="{{ url_for('core.contact') }}"
+        class="{{ 'active' if request.endpoint == 'core.contact' else '' }}">Contact
+        </a>
+        <a href="{{ url_for('core.projects') }}"
+        class="{{ 'active' if request.endpoint == 'core.projects' else '' }}">Projects
+        </a>
+    </nav>
+    {% block content %}
+    {% endblock %}
+</body>
+</html>

@@ -2,8 +2,6 @@
 run.py: entry point for Flask web application, running Flask application
 along with blueprints
 """
-from logging import info
-
 from flask import Flask
 from app.core.views import core
 

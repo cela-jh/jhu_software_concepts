@@ -1,0 +1,38 @@
+{% extends "base.html" %}
+
+{% block title %}About - Cameron Ela{% endblock %}
+
+{% block content %}
+    <h1>Cameron Ela</h1>
+    <h2>M.S. Artificial Intelligence Candidate, Johns Hopkins University</h2><br>
+    <div class="bio-section">
+        <div class="bio-text">
+            <h3>About</h3>
+            <p>
+                Cameron Ela (EE-LUH) is a Data Engineering Intern at CureMetrix. 
+                He earned his B.S. in Economics and Data Science with a Minor in Artificial Intelligence 
+                from the University of Southern California in 2024. Continuing at USC, he completed his 
+                M.S. in Applied Data Science a year later. He is based in Long Beach, California.<br><br>
+                Cameron hopes to use his data science background to advance healthcare, helping develop
+                more effective treatments for autoimmune diseases. Specifically, his goal is to one day help cure or permanently
+                suppress ulcerative colitis, a form of the autoimmune condition inflammatory bowel disease.
+            </p>
+            <h3>Quick Hits</h3>
+            <ul>
+                <li>Loves water sports — played water polo, rowed, and swam growing up</li>
+                <li>Enjoys weight training</li>
+                <li>Played alto and tenor saxophone for 10 years; produces mixes with DJing</li>
+                <li>Spends hours gaming, especially <i>Civilization VI</i>, <i>Overwatch</i>, and <i>Minecraft</i></li>
+                <li>Watches lots of association football (soccer) and college football. Die-hard Real Madrid and USC Trojans fan!</li>
+                <li>Learning Vietnamese on Duolingo to better communicate with older family</li>
+
+            </ul>
+        </div>
+        <div class="photo-grid">
+            <img src="{{ url_for('core.static', filename='images/headshot.JPG') }}" alt="headshot">
+            <img src="{{ url_for('core.static', filename='images/water polo.jpg') }}" alt="water polo">
+            <img src="{{ url_for('core.static', filename='images/Real_Madrid_CF.svg.webp') }}" alt="Real Madrid">
+            <img src="{{ url_for('core.static', filename='images/usc_logo.jpg') }}" alt="USC Trojans">
+        </div>
+    </div>
+{% endblock %}

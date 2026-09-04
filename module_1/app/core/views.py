@@ -11,7 +11,7 @@ core = Blueprint("core", __name__, template_folder="templates",
 
 # home page
 @core.route("/")
-def index():
+def home():
     return render_template("home.html")
 
 # contact page

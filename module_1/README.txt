@@ -70,3 +70,7 @@ app/
         static/
             css/style.css      site styling
             images/            photos used on the homepage
+
+Citations
+----------
+- CLAUDE: used as an advisor role, answering questions about HTML, CSS, and Blueprints. Helped construct this README, mainly for pretty-printing lists and file trees

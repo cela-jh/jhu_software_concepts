@@ -118,15 +118,21 @@ def check_robots_allowed(url, user_agent="*"):
     return robots_parser.can_fetch(user_agent, url)
 
 
-def _get_page(driver, url, wait=3, retries=3, retry_delay=10):
+def _get_page(driver, url, wait=2, retries=5, base_retry_delay=15):
     """
     Scrapes the admissions results table from the given URL (a GradCafe survey page).
+    Retries on transient navigation/timeout errors or unexpected page content,
+    with an exponentially growing delay between attempts.
     Returns a BeautifulSoup object.
     """
+    soup = None
     for attempt in range(1, retries + 1):
-        # log error if HTTP error is raised
         try:
             driver.get(url)
+            candidate = BeautifulSoup(driver.page_source, "html.parser")
+            if candidate.find("tbody") is None:
+                raise RuntimeError(f"Results table not found (page title: '{driver.title}').")
+            soup = candidate
             break
         except HTTPError as e:
             print("HTTP Error:", e.code)
@@ -135,10 +141,10 @@ def _get_page(driver, url, wait=3, retries=3, retry_delay=10):
             print(f"Page load failed (attempt {attempt}/{retries}): {e}")
             if attempt == retries:
                 raise
+            retry_delay = base_retry_delay * (2 ** (attempt - 1))
+            print(f"Retrying in {retry_delay}s...")
             time.sleep(retry_delay)
 
-    # adapt Selenium driver to existing BeautifulSoup architecture
-    soup = BeautifulSoup(driver.page_source, "html.parser")
     time.sleep(wait)    #  add polite polling time
 
     return soup

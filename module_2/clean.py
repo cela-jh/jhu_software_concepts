@@ -5,7 +5,6 @@ from GradCafe. The `parse_results` function is run in `main.py`.
 """
 import re
 from urllib.parse import urljoin
-from bs4 import BeautifulSoup
 
 
 TAGS_REGEX_DICT = {
@@ -19,7 +18,7 @@ TAGS_REGEX_DICT = {
 }
 
 
-def group_rows(results):
+def _group_rows(results):
     """
     Groups main data values with accompanying tags and comments. Rows with tags 
     or comments have class="tw-border-none".
@@ -44,7 +43,7 @@ def group_rows(results):
     return groups
 
 
-def get_tag(tag, text):
+def _get_tag(tag, text):
     """
     Uses regex to find a tag.
     Returns tag if it exists, else None.
@@ -57,7 +56,7 @@ def get_tag(tag, text):
     return match.group(0) if match else None
 
 
-def parse_main_row(main_row, url):
+def _parse_main_row(main_row, url):
     """
     Parses the main row to get school, program, date added, status, 
     status date, and url.
@@ -72,16 +71,16 @@ def parse_main_row(main_row, url):
     program_spans = cells[1].find_all("span")
     program = program_spans[0].get_text(strip=True)
     degree_text = program_spans[1].get_text(strip=True)
-    is_phd_other = True if get_tag("degree", degree_text) else False
-    degree = get_tag("degree", degree_text) if is_phd_other else "Masters"
+    is_phd_other = True if _get_tag("degree", degree_text) else False
+    degree = _get_tag("degree", degree_text) if is_phd_other else "Masters"
 
     # get date added from third cell
     date_added = "Added on " + cells[2].get_text(strip=True)
 
     # get status using regex on text from fourth cell
     status_text = cells[3].get_text(strip=True)
-    status = get_tag("status", status_text)
-    decision_date = get_tag("decision date", status_text)
+    status = _get_tag("status", status_text)
+    decision_date = _get_tag("decision date", status_text)
 
     # get url from fifth cell
     result_url = urljoin(url, cells[4].find("a")["href"])  
@@ -95,14 +94,14 @@ def parse_main_row(main_row, url):
     }
     # adds acceptance/rejection date
     if status == "Accepted":
-        main_row_parsed["acceptance date"] = decision_date
+        main_row_parsed["status"] += f" on {decision_date}"
     elif status == "Rejected":
-        main_row_parsed["rejection date"] = decision_date
+        main_row_parsed["status"] += f" on {decision_date}"
 
     return main_row_parsed
 
 
-def parse_tags_row(tags_row):
+def _parse_tags_row(tags_row):
     """
     Used for parsing the subsequent tags row's cells. Not for use with main row.
     Returns a dictionary of any tags found.
@@ -110,7 +109,7 @@ def parse_tags_row(tags_row):
     wrapper = tags_row.find("div")
     all_cells = wrapper.find_all("div", recursive=False)
     # drop redundant status object if it exists
-    tags_cells = [cell for cell in all_cells if not get_tag("status", cell.get_text(strip=True))]
+    tags_cells = [cell for cell in all_cells if not _get_tag("status", cell.get_text(strip=True))]
 
     # get tags that always appear
     tags_parsed = {
@@ -122,25 +121,25 @@ def parse_tags_row(tags_row):
     if len(tags_cells) > 2:
         for tag in tags_cells[2:]:
             text = tag.get_text(strip=True)
-            if get_tag("GRE AW", text):
-                tags_parsed["GRE AW"] = get_tag("GRE AW", text)
-            elif get_tag("GRE V score", text):
-                tags_parsed["GRE V score"] = get_tag("GRE V score", text)
-            elif get_tag("GRE score", text):
-                tags_parsed["GRE score"] = get_tag("GRE score", text)
-            elif get_tag("GPA", text):
-                tags_parsed["GPA"] = get_tag("GPA", text)
+            if _get_tag("GRE AW", text):
+                tags_parsed["GRE AW"] = _get_tag("GRE AW", text)
+            elif _get_tag("GRE V score", text):
+                tags_parsed["GRE V score"] = _get_tag("GRE V score", text)
+            elif _get_tag("GRE score", text):
+                tags_parsed["GRE score"] = _get_tag("GRE score", text)
+            elif _get_tag("GPA", text):
+                tags_parsed["GPA"] = _get_tag("GPA", text)
 
     return tags_parsed
 
 
-def parse_sub_rows(extra_rows):
+def _parse_sub_rows(extra_rows):
     """
     Parses the tags and comments rows grouped with a main row.
     Returns a combined dictionary of tags and comment data.
     """
     sub_rows_parsed = dict()
-    tags_row_parsed = parse_tags_row(extra_rows[0])
+    tags_row_parsed = _parse_tags_row(extra_rows[0])
     sub_rows_parsed.update(tags_row_parsed)
 
     # get comments if exists
@@ -151,7 +150,7 @@ def parse_sub_rows(extra_rows):
     return sub_rows_parsed
 
 
-def order_keys(parsed_results):
+def _order_keys(parsed_results):
     """
     Orders keys for preferred output.
     Returns dictionary with custom ordered keys.
@@ -172,7 +171,7 @@ def order_keys(parsed_results):
     return parsed_results_ordered
 
 
-def parse_groups(grouped_results, url):
+def _parse_groups(grouped_results, url):
     """
     Parses the list of grouped admissions.
     Returns a list of readable dictionaries.
@@ -181,15 +180,15 @@ def parse_groups(grouped_results, url):
     for group in grouped_results:
         # parse main row
         main_row = group[0]
-        main_row_parsed = parse_main_row(main_row, url)
+        main_row_parsed = _parse_main_row(main_row, url)
         # parse subsequent rows (not implemented)
         sub_rows = group[1]
-        sub_rows_parsed = parse_sub_rows(sub_rows)
+        sub_rows_parsed = _parse_sub_rows(sub_rows)
         # concatenate dictionaries into a single result and append
         parsed_result = main_row_parsed
         parsed_result.update(sub_rows_parsed)
         # order keys and append to parsed results
-        parsed_result_ordered = order_keys(parsed_result)
+        parsed_result_ordered = _order_keys(parsed_result)
         parsed_results.append(parsed_result_ordered)
 
     return parsed_results
@@ -201,7 +200,7 @@ def clean_data(results: list, url):
     Returns a list of dictionaries, each containing relevant information about 
     a single result.
     """
-    groups = group_rows(results)
-    parsed_results = parse_groups(groups, url)
+    groups = _group_rows(results)
+    parsed_results = _parse_groups(groups, url)
 
     return parsed_results

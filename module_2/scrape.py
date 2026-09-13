@@ -11,29 +11,19 @@ import subprocess
 from urllib.request import urlopen
 from urllib.error import HTTPError, URLError
 from urllib.parse import urljoin
-from pathlib import Path
 from selenium import webdriver
 from bs4 import BeautifulSoup
 
 
-def open_chrome():
+def _open_chrome(chrome_bin):
     """
-    Opens Chrome in remote debugging mode using input path to Chrome binary.
+    Opens Chrome in remote debugging mode using given Chrome binary path.
     Returns the Chrome process and profile used.
     """
-    # validate Chrome binary path
-    chrome_bin = None
-    while chrome_bin is None:
-        chrome_bin = input("Use Chrome to scrape. Paste the absolute path to your Chrome binary: ")
-        candidate = Path(chrome_bin)
-        if candidate.exists():
-            chrome_path = candidate
-        else:
-            print(f"'{chrome_bin}' is not a valid path. Try again.")
     # open Chrome in remote debugging mode and silence logs so input prompt can be seen
     profile_dir = tempfile.mkdtemp()
     chrome_process = subprocess.Popen(
-        [chrome_path, "--remote-debugging-port=9222", f"--user-data-dir={profile_dir}"],
+        [chrome_bin, "--remote-debugging-port=9222", f"--user-data-dir={profile_dir}"],
         stdout=subprocess.DEVNULL,
         stderr=subprocess.DEVNULL
     )
@@ -41,7 +31,7 @@ def open_chrome():
     return (chrome_process, profile_dir)
 
 
-def try_debug_endpoint(host_port, retries=10):
+def _try_debug_endpoint(host_port, retries=10):
     """
     Tries opening the debugging endpoint until open or reaching number of retries.
     """
@@ -53,7 +43,7 @@ def try_debug_endpoint(host_port, retries=10):
             time.sleep(1)
 
 
-def init_webdriver(host_port):
+def _init_webdriver(host_port):
     """
     Create Chrome webdriver with remote debug options.
     Returns Chrome driver.
@@ -76,22 +66,22 @@ def terminate_process(process, profile, timeout=10):
     shutil.rmtree(profile)
 
 
-def chrome_helper(url, host_port):
+def chrome_helper(url, host_port, chrome_bin):
     """
     Helper to work around Cloudflare verification at url (GradCafe).
     Returns resulting driver.
     """
-    chrome_process, profile_dir = open_chrome()
+    chrome_process, profile_dir = _open_chrome(chrome_bin)
     http_host = "http://" + host_port
-    try_debug_endpoint(http_host)
-    driver = init_webdriver(host_port)
+    _try_debug_endpoint(http_host)
+    driver = _init_webdriver(host_port)
     driver.get(url)
     input("Complete Cloudflare check in browser. Then, press Enter: ")
 
     return driver, chrome_process, profile_dir
 
 
-def get_page(driver, url, wait=3):
+def _get_page(driver, url, wait=3):
     """
     Scrapes the admissions results table from the given URL (a GradCafe survey page).
     Returns a BeautifulSoup object.
@@ -110,14 +100,28 @@ def get_page(driver, url, wait=3):
     return soup
 
 
+def _get_next_page_url(soup):
+    """
+    Gets the "Next" page button link's url.
+    Returns the url, else None:
+    """
+    nav = soup.find("nav", attrs={"aria-label": "Results pagination"})
+    for link in nav.find_all("a"):
+        if link.get_text(strip=True) == "Next":
+            return link["href"]
+    
+    return None    
+
+
 def scrape_data(driver, url):
     """
     Scrapes admissions results from the given URL (a GradCafe result page).
     Returns list of Tag objects, each being a row with application details.
     """
-    soup = get_page(driver, url)
+    soup = _get_page(driver, url)
     table = soup.find("tbody")
     results = table.find_all("tr")
+    next_page_url = _get_next_page_url(soup)
 
-    return results
+    return results, next_page_url
     

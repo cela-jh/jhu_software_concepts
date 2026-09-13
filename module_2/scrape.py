@@ -113,7 +113,7 @@ def get_page(driver, url, wait=3):
 def scrape_data(driver, url):
     """
     Scrapes admissions results from the given URL (a GradCafe result page).
-    Returns raw HTML of the application details.
+    Returns list of Tag objects, each being a row with application details.
     """
     soup = get_page(driver, url)
     table = soup.find("tbody")

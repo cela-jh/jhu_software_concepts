@@ -4,6 +4,7 @@ Runs the scraping and cleaning process for admissions results from GradCafe.
 Uses a helper script to handle Cloudflare's anti-bot protection.
 """
 from scrape import scrape_data, chrome_helper, terminate_process
+from clean import clean_data
 
 
 def main():
@@ -12,7 +13,7 @@ def main():
     driver, chrome_process, profile_dir = chrome_helper(admissions_url, "127.0.0.1:9222")
     try:
         admissions_results = scrape_data(driver, admissions_url)
-        print(admissions_results)
+        parsed_results = clean_data(admissions_results, admissions_url)
     finally:
         terminate_process(chrome_process, profile_dir)
 

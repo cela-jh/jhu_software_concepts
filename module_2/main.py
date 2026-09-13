@@ -63,13 +63,12 @@ def parse_args():
     return parser.parse_args()
 
 
-def main():
+def main(args):
     """
     Execute with following on CLI:
     For scraping: python main.py --num_results {integer} [relative_filepath="applicant_data.json"]
     For loading: python main.py --load [relative_filepath="applicant_data.json"]
     """
-    args = parse_args()
     validate_filepath(args.relative_filepath, must_exist=args.load)
 
     # if loading a results file
@@ -132,4 +131,4 @@ def main():
 
 
 if __name__ == "__main__":
-    main()
+    main(parse_args())

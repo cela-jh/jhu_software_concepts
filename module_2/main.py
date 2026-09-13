@@ -26,7 +26,7 @@ def format_duration(seconds):
     elif minutes > 0 and hours == 0:
         return f"{minutes}m {secs}s"
     
-    return f"{hours}h {minutes}m {secs}s"
+    return f"{hours}h {minutes}m {round(secs, 0)}s"
 
 
 def parse_args():
@@ -87,14 +87,15 @@ def main(args):
         )
         result_count = 0
         current_url = admissions_url
+        pages_completed = 0
         total_start = time.time()
 
         # continue scraping until CLI quota met
         while result_count < args.num_results:
-            loop_start = time.time()
             admissions_results, next_page_url = scrape_data(driver, current_url)
             parsed_results = clean_data(admissions_results, current_url)
             result_count += len(parsed_results)
+            pages_completed += 1
 
             save_data(parsed_results, args.relative_filepath)
 
@@ -107,8 +108,13 @@ def main(args):
                 print(f"No additional pages available. Stopping at {result_count} results.")
                 break
 
-            loop_elapsed = round(time.time() - loop_start, 1)
-            print(f"{format_duration(loop_elapsed)}     Page done: {len(parsed_results)} results (running total: {result_count})")
+            avg_loop_time = (time.time() - total_start) / pages_completed
+            remaining_results = args.num_results - result_count
+            remaining_pages = -(-remaining_results // 20)  # ceiling division
+            eta_seconds = remaining_pages * avg_loop_time
+            print(
+                f"Running total: {result_count} (ETA: {format_duration(eta_seconds)})"
+            )
 
             current_url = next_page_url
 

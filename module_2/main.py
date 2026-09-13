@@ -115,10 +115,16 @@ def main(args):
 
         pages_completed = 0
         total_start = time.time()
+        # first page (fresh or resumed) needs an explicit URL navigation;
+        # subsequent pages are reached by clicking "Next" inside scrape_data
+        navigate_by_url = True
 
         # continue scraping until CLI quota met
         while result_count < args.num_results:
-            admissions_results, next_page_url = scrape_data(driver, current_url)
+            admissions_results, next_page_url = scrape_data(
+                driver, current_url if navigate_by_url else None
+            )
+            navigate_by_url = False
             parsed_results = clean_data(admissions_results, current_url)
             result_count += len(parsed_results)
             pages_completed += 1
@@ -155,6 +161,7 @@ def main(args):
                 driver, chrome_process = chrome_helper(
                     admissions_url, "127.0.0.1:9222", args.chrome_binary, profile_dir
                 )
+                navigate_by_url = True
 
         total_elapsed = round(time.time() - total_start, 0)
         print(f"Total scraping time: {format_duration(total_elapsed)}")

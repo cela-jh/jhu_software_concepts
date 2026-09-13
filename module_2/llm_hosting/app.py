@@ -8,11 +8,14 @@ import os
 import re
 import sys
 import difflib
+from pathlib import Path
 from typing import Any, Dict, List, Tuple
 
 from flask import Flask, jsonify, request
 from huggingface_hub import hf_hub_download
 from llama_cpp import Llama  # CPU-only by default if N_GPU_LAYERS=0
+
+from llm_helper import split_and_run
 
 app = Flask(__name__)
 
@@ -112,20 +115,28 @@ FEW_SHOTS: List[Tuple[Dict[str, str], Dict[str, str]]] = [
 
 _LLM: Llama | None = None
 
+MODELS_DIR = Path(__file__).parent / "models"
+
+
+def _get_model_path() -> str:
+    """Downloads the GGUF file if not already present, otherwise reuses it."""
+    local_path = MODELS_DIR / MODEL_FILE
+    if local_path.is_file():
+        return str(local_path)
+    return hf_hub_download(
+        repo_id=MODEL_REPO,
+        filename=MODEL_FILE,
+        local_dir=str(MODELS_DIR),
+    )
+
 
 def _load_llm() -> Llama:
-    """Download (or reuse) the GGUF file and initialize llama.cpp."""
+    """Initialize llama.cpp using the (already downloaded) GGUF file."""
     global _LLM
     if _LLM is not None:
         return _LLM
 
-    model_path = hf_hub_download(
-        repo_id=MODEL_REPO,
-        filename=MODEL_FILE,
-        local_dir="models",
-        local_dir_use_symlinks=False,
-        force_filename=MODEL_FILE,
-    )
+    model_path = _get_model_path()
 
     _LLM = Llama(
         model_path=model_path,
@@ -348,11 +359,33 @@ if __name__ == "__main__":
         action="store_true",
         help="Write JSON Lines to stdout instead of a file.",
     )
+    parser.add_argument(
+        "--parallel",
+        action="store_true",
+        help="Split the input across multiple worker subprocesses for faster "
+        "processing. Output is a single JSON array, not JSON Lines.",
+    )
+    parser.add_argument(
+        "--n_workers",
+        type=int,
+        default=12,
+        help="Number of parallel worker processes when --parallel is set (default: 12).",
+    )
+    parser.add_argument(
+        "--n_threads",
+        type=int,
+        default=1,
+        help="Threads per worker process when --parallel is set (default: 1, "
+        "to avoid CPU oversubscription).",
+    )
     args = parser.parse_args()
 
     if args.serve or args.file is None:
         port = int(os.getenv("PORT", "8000"))
         app.run(host="0.0.0.0", port=port, debug=False)
+    elif args.parallel:
+        out_path = args.out or (args.file + ".json")
+        split_and_run(args.file, out_path, args.n_workers, args.n_threads)
     else:
         _cli_process_file(
             in_path=args.file,

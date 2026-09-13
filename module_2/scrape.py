@@ -51,6 +51,9 @@ def _init_webdriver(host_port):
     """
     options = webdriver.ChromeOptions()
     options.debugger_address = host_port
+    options.add_experimental_option("prefs", {
+        "profile.managed_default_contnet_settings.images": 2
+    })
     driver = webdriver.Chrome(options=options)
 
     return driver
@@ -97,7 +100,7 @@ def check_robots_allowed(url, user_agent="*"):
     return robots_parser.can_fetch(user_agent, url)
 
 
-def _get_page(driver, url, wait=3):
+def _get_page(driver, url, wait=1):
     """
     Scrapes the admissions results table from the given URL (a GradCafe survey page).
     Returns a BeautifulSoup object.

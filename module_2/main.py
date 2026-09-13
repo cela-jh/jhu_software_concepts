@@ -49,7 +49,6 @@ def parse_args():
         "--load", action="store_true",
         help="Load and print an existing results file instead of scraping."
     )
-    # my Chrome bin: /Applications/Google Chrome.app/Contents/MacOS/Google Chrome
     parser.add_argument(
         "--chrome_binary", type=Path,
         help="Absolute path to the system Chrome binary. Required unless" \
@@ -64,11 +63,6 @@ def parse_args():
 
 
 def main(args):
-    """
-    Execute with following on CLI:
-    For scraping: python main.py --num_results {integer} [relative_filepath="applicant_data.json"]
-    For loading: python main.py --load [relative_filepath="applicant_data.json"]
-    """
     validate_filepath(args.relative_filepath, must_exist=args.load)
 
     # if loading a results file
@@ -102,10 +96,6 @@ def main(args):
             parsed_results = clean_data(admissions_results, current_url)
             result_count += len(parsed_results)
 
-            # log results to console
-            for result in parsed_results:
-                print(json.dumps(result, indent=2))
-
             save_data(parsed_results, args.relative_filepath)
 
             if result_count >= args.num_results:
@@ -118,7 +108,7 @@ def main(args):
                 break
 
             loop_elapsed = round(time.time() - loop_start, 1)
-            print(f"{format_duration(loop_elapsed)}     Proceeding to next page:\n")
+            print(f"{format_duration(loop_elapsed)}     Page done: {len(parsed_results)} results (running total: {result_count})")
 
             current_url = next_page_url
 
@@ -131,4 +121,10 @@ def main(args):
 
 
 if __name__ == "__main__":
+    """
+    Execute with following on CLI:
+    For scraping: python main.py --num_results {integer} --chrome_binary {abs_path_bin} [relative_filepath="applicant_data.json"]
+    For loading: python main.py --load [relative_filepath="applicant_data.json"]
+    """
+    # my Chrome bin: "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome"
     main(parse_args())

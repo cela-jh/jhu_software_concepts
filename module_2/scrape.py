@@ -16,20 +16,27 @@ from selenium import webdriver
 from bs4 import BeautifulSoup
 
 
-def _open_chrome(chrome_bin):
+def create_profile_dir():
     """
-    Opens Chrome in remote debugging mode using given Chrome binary path.
-    Returns the Chrome process and profile used.
+    Creates a new temporary Chrome profile directory.
+    Returns the path.
     """
-    # open Chrome in remote debugging mode and silence logs so input prompt can be seen
-    profile_dir = tempfile.mkdtemp()
+    return tempfile.mkdtemp()
+
+
+def _open_chrome(chrome_bin, profile_dir):
+    """
+    Opens Chrome in remote debugging mode using given Chrome binary path
+    and a persistent profile directory.
+    Returns the Chrome process.
+    """
     chrome_process = subprocess.Popen(
         [chrome_bin, "--remote-debugging-port=9222", f"--user-data-dir={profile_dir}"],
         stdout=subprocess.DEVNULL,
         stderr=subprocess.DEVNULL
     )
+    return chrome_process
 
-    return (chrome_process, profile_dir)
 
 
 def _try_debug_endpoint(host_port, retries=10):
@@ -52,37 +59,48 @@ def _init_webdriver(host_port):
     options = webdriver.ChromeOptions()
     options.debugger_address = host_port
     options.add_experimental_option("prefs", {
-        "profile.managed_default_contnet_settings.images": 2
+        "profile.managed_default_content_settings.images": 2
     })
     driver = webdriver.Chrome(options=options)
 
     return driver
 
 
-def terminate_process(process, profile, timeout=10):
+def terminate_process(process, timeout=10):
     """
-    Performs cleanup with open remote debug Chrome browser and removes
-    temporary profile.
+    Terminates the given Chrome process. Does not remove the profile
+    directory, since it may be reused across restarts.
     Returns none.
     """
     process.terminate()
     process.wait(timeout=timeout)
-    shutil.rmtree(profile)
 
 
-def chrome_helper(url, host_port, chrome_bin):
+def cleanup_profile(profile_dir):
     """
-    Helper to work around Cloudflare verification at url (GradCafe).
-    Returns resulting driver.
+    Removes the given Chrome profile directory. Call only once the profile
+    is done being reused (i.e. scraping has fully finished).
+    Returns none.
     """
-    chrome_process, profile_dir = _open_chrome(chrome_bin)
+    shutil.rmtree(profile_dir)
+
+
+def chrome_helper(url, host_port, chrome_bin, profile_dir):
+    """
+    Helper to work around Cloudflare verification at url (GradCafe), using a
+    persistent Chrome profile so a cleared session survives restarts.
+    Only pauses for manual input if a Cloudflare challenge is actually shown.
+    Returns resulting driver and Chrome process.
+    """
+    chrome_process = _open_chrome(chrome_bin, profile_dir)
     http_host = "http://" + host_port
     _try_debug_endpoint(http_host)
     driver = _init_webdriver(host_port)
     driver.get(url)
-    input("Complete Cloudflare check in browser. Then, press Enter: ")
+    if "Just a moment" in driver.title:
+        input("Complete Cloudflare check in browser. Then, press Enter: ")
 
-    return driver, chrome_process, profile_dir
+    return driver, chrome_process
 
 
 def check_robots_allowed(url, user_agent="*"):
@@ -100,17 +118,24 @@ def check_robots_allowed(url, user_agent="*"):
     return robots_parser.can_fetch(user_agent, url)
 
 
-def _get_page(driver, url, wait=1):
+def _get_page(driver, url, wait=3, retries=3, retry_delay=10):
     """
     Scrapes the admissions results table from the given URL (a GradCafe survey page).
     Returns a BeautifulSoup object.
     """
-    # log error if HTTP error is raised
-    try:
-        driver.get(url)
-    except HTTPError as e:
-        print("HTTP Error:", e.code)
-        sys.exit(1)
+    for attempt in range(1, retries + 1):
+        # log error if HTTP error is raised
+        try:
+            driver.get(url)
+            break
+        except HTTPError as e:
+            print("HTTP Error:", e.code)
+            sys.exit(1)
+        except Exception as e:
+            print(f"Page load failed (attempt {attempt}/{retries}): {e}")
+            if attempt == retries:
+                raise
+            time.sleep(retry_delay)
 
     # adapt Selenium driver to existing BeautifulSoup architecture
     soup = BeautifulSoup(driver.page_source, "html.parser")

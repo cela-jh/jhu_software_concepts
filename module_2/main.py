@@ -7,9 +7,14 @@ import argparse
 import json
 import time
 from pathlib import Path
-from scrape import scrape_data, chrome_helper, terminate_process, check_robots_allowed
+from scrape import (
+    scrape_data, chrome_helper, terminate_process, cleanup_profile,
+    create_profile_dir, check_robots_allowed
+)
 from clean import clean_data
 from data import save_data, load_data, validate_filepath, save_state, load_state
+
+RESTART_EVERY_N_PAGES = 100
 
 
 def format_duration(seconds):
@@ -101,11 +106,11 @@ def main(args):
         return 0
 
     chrome_process = None
-    profile_dir = None
+    profile_dir = create_profile_dir()
     try:
         # open Chrome browser
-        driver, chrome_process, profile_dir = chrome_helper(
-            admissions_url, "127.0.0.1:9222", args.chrome_binary
+        driver, chrome_process = chrome_helper(
+            admissions_url, "127.0.0.1:9222", args.chrome_binary, profile_dir
         )
 
         pages_completed = 0
@@ -143,10 +148,20 @@ def main(args):
 
             current_url = next_page_url
 
+            # periodic restart to clear accumulated browser session state
+            if pages_completed % RESTART_EVERY_N_PAGES == 0:
+                print("Restarting Chrome to clear accumulated session state...")
+                terminate_process(chrome_process)
+                driver, chrome_process = chrome_helper(
+                    admissions_url, "127.0.0.1:9222", args.chrome_binary, profile_dir
+                )
+
         total_elapsed = round(time.time() - total_start, 0)
         print(f"Total scraping time: {format_duration(total_elapsed)}")
     finally:
-        terminate_process(chrome_process, profile_dir)
+        if chrome_process is not None:
+            terminate_process(chrome_process)
+        cleanup_profile(profile_dir)
 
     return 0
 

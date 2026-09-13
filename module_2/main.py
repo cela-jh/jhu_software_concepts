@@ -7,7 +7,7 @@ import argparse
 import json
 import time
 from pathlib import Path
-from scrape import scrape_data, chrome_helper, terminate_process
+from scrape import scrape_data, chrome_helper, terminate_process, check_robots_allowed
 from clean import clean_data
 from data import save_data, load_data, validate_filepath
 
@@ -85,6 +85,9 @@ def main():
         raise FileNotFoundError(f"'{args.chrome_binary}' is not a valid Chrome binary path.")
 
     admissions_url = "https://www.thegradcafe.com/survey"
+    # check for permission with robots.txt
+    if not check_robots_allowed(admissions_url):
+        raise PermissionError(f"Scraping {admissions_url} is disallowed by robots.txt")
     try:
         driver, chrome_process, profile_dir = chrome_helper(
             admissions_url, "127.0.0.1:9222", args.chrome_binary

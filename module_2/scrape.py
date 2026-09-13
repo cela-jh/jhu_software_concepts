@@ -10,7 +10,8 @@ import shutil
 import subprocess
 from urllib.request import urlopen
 from urllib.error import HTTPError, URLError
-from urllib.parse import urljoin
+from urllib.parse import urljoin, urlparse
+from urllib.robotparser import RobotFileParser
 from selenium import webdriver
 from bs4 import BeautifulSoup
 
@@ -79,6 +80,21 @@ def chrome_helper(url, host_port, chrome_bin):
     input("Complete Cloudflare check in browser. Then, press Enter: ")
 
     return driver, chrome_process, profile_dir
+
+
+def check_robots_allowed(url, user_agent="*"):
+    """
+    Checks the site's robots.txt to see if scraping is permitted on the domain.
+    Returns True if allowed, else False.
+    """
+    parsed = urlparse(url)
+    robots_url = f"{parsed.scheme}://{parsed.netloc}/robots.txt"
+
+    robots_parser = RobotFileParser()
+    robots_parser.set_url(robots_url)
+    robots_parser.read()
+
+    return robots_parser.can_fetch(user_agent, url)
 
 
 def _get_page(driver, url, wait=3):

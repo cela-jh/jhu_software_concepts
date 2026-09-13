@@ -52,4 +52,23 @@ def validate_filepath(filepath, must_exist=False):
         raise ValueError(f"'{filepath}' is not a JSON file")
     if must_exist and not filepath.is_file():
         raise FileNotFoundError(f"'{filepath}' does not exist")
-    
+
+
+def save_state(state, filepath):
+    """
+    Writes scrape progress state (next URL, result count) to a sidecar file.
+    Returns none.
+    """
+    with open(filepath, "w") as f:
+        json.dump(state, f)
+
+
+def load_state(filepath):
+    """
+    Loads scrape progress state if it exists.
+    Returns the state dict, or None if no state file exists.
+    """
+    if not filepath.is_file():
+        return None
+    with open(filepath) as f:
+        return json.load(f)

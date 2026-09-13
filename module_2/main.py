@@ -9,7 +9,7 @@ import time
 from pathlib import Path
 from scrape import scrape_data, chrome_helper, terminate_process, check_robots_allowed
 from clean import clean_data
-from data import save_data, load_data, validate_filepath
+from data import save_data, load_data, validate_filepath, save_state, load_state
 
 
 def format_duration(seconds):
@@ -81,12 +81,33 @@ def main(args):
     # check for permission with robots.txt
     if not check_robots_allowed(admissions_url):
         raise PermissionError(f"Scraping {admissions_url} is disallowed by robots.txt")
+
+    # getting recent state or starting new
+    current_url = None
+    result_count = None
+    state_path = args.relative_filepath.with_suffix(".state.json")
+    state = load_state(state_path)
+    if state:
+        current_url = state["next_url"]
+        result_count = state["result_count"]
+        print(f"Resuming from saved state: {result_count} results already collected.")
+    else:
+        current_url = admissions_url
+        result_count = 0
+
+    # do not scrape if result already reached in file
+    if result_count >= args.num_results:
+        print(f"Already have {result_count} results (>= requested {args.num_results}); nothing to do.")
+        return 0
+
+    chrome_process = None
+    profile_dir = None
     try:
+        # open Chrome browser
         driver, chrome_process, profile_dir = chrome_helper(
             admissions_url, "127.0.0.1:9222", args.chrome_binary
         )
-        result_count = 0
-        current_url = admissions_url
+
         pages_completed = 0
         total_start = time.time()
 
@@ -101,13 +122,17 @@ def main(args):
 
             if result_count >= args.num_results:
                 print(f"Scraping finished with {result_count} results.")
+                state_path.unlink(missing_ok=True)
                 break
 
             # get next page, if exists
             if next_page_url is None:
                 print(f"No additional pages available. Stopping at {result_count} results.")
+                state_path.unlink(missing_ok=True)
                 break
 
+            save_state({"next_url": next_page_url, "result_count": result_count}, state_path)
+            
             avg_loop_time = (time.time() - total_start) / pages_completed
             remaining_results = args.num_results - result_count
             remaining_pages = -(-remaining_results // 20)  # ceiling division

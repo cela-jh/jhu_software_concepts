@@ -4,4 +4,4 @@ venv/
 __pycache__/
 *.pyc
 *.env
-.DS_Store
+.DS_Storemodule_2/llm_hosting/models/

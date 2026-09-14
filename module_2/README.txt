@@ -122,10 +122,21 @@ LOCAL LLM STANDARDIZATION (llm_hosting/)
 
 Adds `llm-generated-program` / `llm-generated-university` to every row via
 a self-hosted TinyLlama model, leaving the original `program` field intact
-for traceability. Run:
+for traceability. From inside module_2, run:
 
     cd llm_hosting && pip install -r requirements.txt
-    python app.py --file ../applicant_data.json --out ../llm_extend_applicant_data.json --parallel
+    python app.py --file ../applicant_data.json --out ../llm_extend_applicant_data.json --parallel --n_workers 10 --n_threads 1
+
+    (--n_workers 10 is a tuned value for a 14-core machine, chosen after
+    observing that going higher led to CPU oversubscription rather than a
+    speedup - see "Fixed CPU oversubscription" below; adjust it down on a
+    machine with fewer cores)
+
+While it's running, each worker's progress can be checked at any time by
+counting completed lines in its chunk output file, from inside
+llm_hosting/:
+
+    wc -l chunk_*.jsonl
 
 Changes made on top of the provided app.py:
   - Parallelization (new file llm_helper.py, public functions

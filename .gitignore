@@ -5,5 +5,5 @@ __pycache__/
 *.pyc
 *.env
 .DS_Store
-module_2/llm_hosting/models/
+models/
 module_*.zip

@@ -4,17 +4,22 @@ Runs the scraping and cleaning process for admissions results from GradCafe.
 Uses a helper script to handle Cloudflare's anti-bot protection.
 """
 import argparse
-import json
+import functools
 import time
 from pathlib import Path
+
+# Force every print() in this process to flush immediately for logging purposes.
+# Helps prevent making a script that is working look hung.
+print = functools.partial(print, flush=True)
 from scrape import (
     scrape_data, chrome_helper, terminate_process, cleanup_profile,
     create_profile_dir, check_robots_allowed
 )
 from clean import clean_data
-from data import save_data, load_data, validate_filepath, save_state, load_state
+from data import save_data, validate_filepath, save_state, load_state, load_existing_urls
+from load_data import load_data
 
-RESTART_EVERY_N_PAGES = 100
+RESTART_EVERY_N_PAGES = 500
 
 
 def format_duration(seconds):
@@ -24,10 +29,8 @@ def format_duration(seconds):
     hours, remainder = divmod(int(seconds), 3600)
     minutes, secs = divmod(remainder, 60)
 
-    # executes in seconds
     if minutes == 0 and hours == 0:
         return f"{secs}s"
-    # executes in minutes
     elif minutes > 0 and hours == 0:
         return f"{minutes}m {secs}s"
     
@@ -42,7 +45,6 @@ def parse_args():
         description="Scrape GradCafe admissions results or load previously " \
         "saved results data from JSON."
     )
-    # --num_results and --load are mutually exclusive
     group = parser.add_mutually_exclusive_group(required=True)
     group.add_argument(
         "--num_results", type=int,
@@ -70,37 +72,34 @@ def parse_args():
 def main(args):
     validate_filepath(args.relative_filepath, must_exist=args.load)
 
-    # if loading a results file
     if args.load:
         load_data(args.relative_filepath)
         return 0
 
-    # missing Chrome binary for scraping
     if args.chrome_binary is None:
         raise ValueError("--chrome_binary is required unless --load is given.")
-    # invalid filepath to Chrome binary
     if not args.chrome_binary.is_file():
         raise FileNotFoundError(f"'{args.chrome_binary}' is not a valid Chrome binary path.")
 
     admissions_url = "https://www.thegradcafe.com/survey"
-    # check for permission with robots.txt
     if not check_robots_allowed(admissions_url):
         raise PermissionError(f"Scraping {admissions_url} is disallowed by robots.txt")
 
-    # getting recent state or starting new
-    current_url = None
-    result_count = None
+    # urls already on disk are the source of truth for how many unique
+    # results exist and which ones to skip - this makes growing an
+    # already-complete file safe even if the pagination state below is
+    # stale, missing, or points back at page 1
+    seen_urls = load_existing_urls(args.relative_filepath)
+    result_count = len(seen_urls)
+
     state_path = args.relative_filepath.with_suffix(".state.json")
     state = load_state(state_path)
     if state:
         current_url = state["next_url"]
-        result_count = state["result_count"]
-        print(f"Resuming from saved state: {result_count} results already collected.")
+        print(f"Resuming pagination from saved state ({result_count} unique results already in file).")
     else:
         current_url = admissions_url
-        result_count = 0
 
-    # do not scrape if result already reached in file
     if result_count >= args.num_results:
         print(f"Already have {result_count} results (>= requested {args.num_results}); nothing to do.")
         return 0
@@ -108,7 +107,6 @@ def main(args):
     chrome_process = None
     profile_dir = create_profile_dir()
     try:
-        # open Chrome browser
         driver, chrome_process = chrome_helper(
             admissions_url, "127.0.0.1:9222", args.chrome_binary, profile_dir
         )
@@ -119,31 +117,45 @@ def main(args):
         # subsequent pages are reached by clicking "Next" inside scrape_data
         navigate_by_url = True
 
-        # continue scraping until CLI quota met
         while result_count < args.num_results:
             admissions_results, next_page_url = scrape_data(
                 driver, current_url if navigate_by_url else None
             )
             navigate_by_url = False
             parsed_results = clean_data(admissions_results, current_url)
-            result_count += len(parsed_results)
             pages_completed += 1
 
-            save_data(parsed_results, args.relative_filepath)
+            # skip rows whose url is already on disk or already seen this
+            # run, so growing a file that a prior run already completed
+            # or pagination overlaps never adds duplicates
+            new_results = [r for r in parsed_results if r.get("url") not in seen_urls]
+            seen_urls.update(r["url"] for r in new_results if r.get("url"))
+            result_count += len(new_results)
 
-            if result_count >= args.num_results:
-                print(f"Scraping finished with {result_count} results.")
-                state_path.unlink(missing_ok=True)
-                break
+            if new_results:
+                save_data(new_results, args.relative_filepath)
 
-            # get next page, if exists
+            # printed unconditionally for every page whether data was written
+            # or not, so read pages are always visible even when they add nothing new
+            print(
+                f"Page {pages_completed}: read {len(parsed_results)}, "
+                f"{len(new_results)} new ({result_count} total unique so far)"
+            )
+
             if next_page_url is None:
                 print(f"No additional pages available. Stopping at {result_count} results.")
                 state_path.unlink(missing_ok=True)
                 break
 
-            save_state({"next_url": next_page_url, "result_count": result_count}, state_path)
-            
+            # save pagination state even after reaching quota so later
+            # runs asking for more results resume near here instead of
+            # restarting the crawl from page 1
+            save_state({"next_url": next_page_url}, state_path)
+
+            if result_count >= args.num_results:
+                print(f"Scraping finished with {result_count} results.")
+                break
+
             avg_loop_time = (time.time() - total_start) / pages_completed
             remaining_results = args.num_results - result_count
             remaining_pages = -(-remaining_results // 20)  # ceiling division
@@ -174,10 +186,4 @@ def main(args):
 
 
 if __name__ == "__main__":
-    """
-    Execute with following on CLI:
-    For scraping: python main.py --num_results {integer} --chrome_binary {abs_path_bin} [relative_filepath="applicant_data.json"]
-    For loading: python main.py --load [relative_filepath="applicant_data.json"]
-    """
-    # my Chrome bin: "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome"
     main(parse_args())

@@ -3,30 +3,54 @@
 Includes functions to save to and load data from JSON.
 """
 import json
+import os
 from pathlib import Path
 
 
 def save_data(parsed_results, filepath):
     """
-    Takes a single page's list of parsed results dictionaries and writes them 
-    to JSON. This is called after each clean operation and appends to a file.
+    Takes a single page's list of parsed results dictionaries and appends
+    them to the existing JSON array on disk. Builds the new file's full
+    contents in a temp file, reusing the existing file's data plus the newly 
+    appended rows before atomically replacing the original. A crash or interrupt
+    can only ever be caught before or after the replace.
     Returns none.
     """
-    # result gets seralized to JSON, then adds a comma and newline between each
     items_json = ",\n".join(json.dumps(r, indent=2) for r in parsed_results)
     is_new = not filepath.exists() or filepath.stat().st_size == 0
+    tmp_path = filepath.with_suffix(filepath.suffix + ".tmp")
 
-    # if file doesn't exist or has no data
     if is_new:
-        with open(filepath, "w") as f:
-            f.write("[\n" + items_json + "\n]")
+        prefix = b"[\n"
+        body = items_json
     else:
-        with open(filepath, "r+") as f:
-            f.seek(0, 2)            # point to the end of file to begin appending
-            f.seek(f.tell() - 2)    # moves pointer before last newline"
-            f.truncate()            # deletes the newline and closing array bracket
-            new_data = ",\n" + items_json + "\n]"
-            f.write(new_data)
+        with open(filepath, "rb") as f:
+            f.seek(0, 2)
+            size = f.tell()
+            f.seek(0)
+            prefix = f.read(size - 2)  # drop trailing "\n]"
+        body = ",\n" + items_json
+
+    with open(tmp_path, "wb") as f:
+        f.write(prefix)
+        f.write(body.encode("utf-8"))
+        f.write(b"\n]")
+
+    os.replace(tmp_path, filepath)
+
+
+def load_existing_urls(filepath):
+    """
+    Reads the `url` field of every row already saved in filepath, if it
+    exists. Used to skip re-scraping/duplicating rows already on disk when
+    growing a results file that a prior run already completed.
+    Returns a set of urls (empty if the file doesn't exist yet or is empty).
+    """
+    if not filepath.exists() or filepath.stat().st_size == 0:
+        return set()
+    with open(filepath) as f:
+        data = json.load(f)
+    return {row["url"] for row in data if row.get("url")}
 
 
 def validate_filepath(filepath, must_exist=False):
@@ -45,7 +69,7 @@ def validate_filepath(filepath, must_exist=False):
 
 def save_state(state, filepath):
     """
-    Writes scrape progress state (next URL, result count) to a sidecar file.
+    Writes scrape progress state (next URL) to a sidecar file.
     Returns none.
     """
     with open(filepath, "w") as f:

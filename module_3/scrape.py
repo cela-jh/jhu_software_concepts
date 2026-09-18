@@ -9,7 +9,7 @@ import random
 import tempfile
 import shutil
 import subprocess
-from urllib.request import urlopen
+from urllib.request import urlopen, Request
 from urllib.error import HTTPError, URLError
 from urllib.parse import urljoin, urlparse
 from urllib.robotparser import RobotFileParser
@@ -139,14 +139,21 @@ def chrome_helper(url, host_port, chrome_bin, profile_dir, retries=5, base_retry
 def check_robots_allowed(url, user_agent="*"):
     """
     Checks the site's robots.txt to see if scraping is permitted on the domain.
+    Fetches it with a browser-like User-Agent, since Cloudflare returns a 403
+    for RobotFileParser's default "Python-urllib/x.y" UA - which robotparser's
+    read() treats as "disallow everything" rather than as a fetch failure.
     Returns True if allowed, else False.
     """
     parsed = urlparse(url)
     robots_url = f"{parsed.scheme}://{parsed.netloc}/robots.txt"
 
+    request = Request(robots_url, headers={"User-Agent": "Mozilla/5.0"})
+    with urlopen(request) as response:
+        lines = response.read().decode("utf-8").splitlines()
+
     robots_parser = RobotFileParser()
     robots_parser.set_url(robots_url)
-    robots_parser.read()
+    robots_parser.parse(lines)
 
     return robots_parser.can_fetch(user_agent, url)
 
@@ -188,23 +195,40 @@ def _get_page(driver, url=None, wait=2, retries=5, base_retry_delay=15):
     return soup
 
 
-def _click_next_page(driver, retries=5, base_retry_delay=15):
+def _click_next_page(driver, retries=5, base_retry_delay=15,
+                      missing_link_retries=3, missing_link_delay=5):
     """
-    Finds and clicks the "Next" pagination link via JavaScript, so navigation
+    Finds and clicks the "Next" pagination link via JavaScript so navigation
     carries a natural Referer header and isn't blocked by overlapping page
-    elements (e.g. ads) that would intercept a native mouse click. Retries
+    elements that would intercept a native mouse click. Retries
     on transient WebDriver command failures.
-    Returns the resulting page's URL, or None if no next page exists.
+
+    Not finding the "Next" link is retried with a short wait and a page
+    refresh up to {missing_link_retries} times in case the page has not loaded yet.
+
+    Returns the resulting page's URL, or None if no next page exists after
+    exhausting missing_link_retries.
     """
     for attempt in range(1, retries + 1):
         try:
-            next_link = driver.find_element(
-                By.XPATH, '//nav[@aria-label="Results pagination"]//a[normalize-space(text())="Next"]'
-            )
+            next_link = None
+            for missing_attempt in range(1, missing_link_retries + 1):
+                try:
+                    next_link = driver.find_element(
+                        By.XPATH, '//nav[@aria-label="Results pagination"]//a[normalize-space(text())="Next"]'
+                    )
+                    break
+                except NoSuchElementException:
+                    if missing_attempt == missing_link_retries:
+                        return None
+                    delay = missing_link_delay * (2 ** (missing_attempt - 1))
+                    print(f"'Next' link not found (check {missing_attempt}/{missing_link_retries}); "
+                          f"refreshing and re-checking in {delay}s before assuming no more pages...")
+                    driver.refresh()
+                    time.sleep(delay)
+
             driver.execute_script("arguments[0].click();", next_link)
             return driver.current_url
-        except NoSuchElementException:
-            return None
         except Exception as e:
             print(f"Click 'Next' failed (attempt {attempt}/{retries}): {e}")
             if attempt == retries:

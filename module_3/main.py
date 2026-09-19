@@ -1,10 +1,11 @@
 """
 `main.py`
-Runs the scraping and cleaning process for admissions results from GradCafe.
-Uses a helper script to handle Cloudflare's anti-bot protection.
+Entry point for scraping GradCafe admissions results or loading a results
+file into the PostgreSQL applicants table.
 """
 import argparse
 import functools
+import os
 import time
 from pathlib import Path
 
@@ -33,51 +34,75 @@ def format_duration(seconds):
         return f"{secs}s"
     elif minutes > 0 and hours == 0:
         return f"{minutes}m {secs}s"
-    
+
     return f"{hours}h {minutes}m {round(secs, 0)}s"
 
 
 def parse_args():
     """
-    Parse CLI arguments for defining scrape job or data to load.
+    Parse CLI arguments for either scraping GradCafe or loading a results
+    file into PostgreSQL.
     """
     parser = argparse.ArgumentParser(
-        description="Scrape GradCafe admissions results or load previously " \
-        "saved results data from JSON."
+        description="Scrape GradCafe admissions results, or load a results "
+        "file into the PostgreSQL applicants table."
     )
     group = parser.add_mutually_exclusive_group(required=True)
     group.add_argument(
-        "--num_results", type=int,
-        help="Number of results to collect. Scraping stops when reaching this" \
-        " many or when there are no more results. There may be slightly more " \
-        "results than the input since results are gathered by page."
+        "--scrape", action="store_true",
+        help="Scrape GradCafe admissions results into a JSON file."
     )
     group.add_argument(
         "--load", action="store_true",
-        help="Load and print an existing results file instead of scraping."
+        help="Load a results file into the PostgreSQL applicants table."
+    )
+    parser.add_argument(
+        "--num_results", type=int,
+        help="Number of results to collect. Required with --scrape."
     )
     parser.add_argument(
         "--chrome_binary", type=Path,
-        help="Absolute path to the system Chrome binary. Required unless" \
-        " --load is given."
+        help="Absolute path to the system Chrome binary. Required with --scrape."
     )
     parser.add_argument(
         "relative_filepath", type=Path, nargs="?", default=Path("applicant_data.json"),
-        help="File to save results to or to load from if --load is given "
-        "(default: `applicant_data.json`)"
+        help="File to save results to when scraping, or to load into "
+        "PostgreSQL with --load (default: `applicant_data.json`)"
     )
     return parser.parse_args()
 
 
-def main(args):
-    validate_filepath(args.relative_filepath, must_exist=args.load)
+def _run_load(args):
+    """
+    Loads a results file into the PostgreSQL applicants table, reading
+    credentials from the PGUSER and PGPASSWORD environment variables so
+    they never appear on the command line or in this repository.
+    Returns none.
+    """
+    validate_filepath(args.relative_filepath, must_exist=True)
 
-    if args.load:
-        load_data(args.relative_filepath)
-        return 0
+    user = os.getenv("PGUSER")
+    password = os.getenv("PGPASSWORD")
+    if not user or not password:
+        print("Set the PGUSER and PGPASSWORD environment variables before using --load.")
+        return
 
+    load_data(args.relative_filepath, user, password)
+
+
+def _run_scrape(args):
+    """
+    Scrapes GradCafe admissions results into a JSON file, resuming from
+    saved pagination state and skipping already-seen results when the
+    output file already exists.
+    Returns none.
+    """
+    validate_filepath(args.relative_filepath, must_exist=False)
+
+    if args.num_results is None:
+        raise ValueError("--num_results is required with --scrape.")
     if args.chrome_binary is None:
-        raise ValueError("--chrome_binary is required unless --load is given.")
+        raise ValueError("--chrome_binary is required with --scrape.")
     if not args.chrome_binary.is_file():
         raise FileNotFoundError(f"'{args.chrome_binary}' is not a valid Chrome binary path.")
 
@@ -102,7 +127,7 @@ def main(args):
 
     if result_count >= args.num_results:
         print(f"Already have {result_count} results (>= requested {args.num_results}); nothing to do.")
-        return 0
+        return
 
     chrome_process = None
     profile_dir = create_profile_dir()
@@ -181,6 +206,17 @@ def main(args):
         if chrome_process is not None:
             terminate_process(chrome_process)
         cleanup_profile(profile_dir)
+
+
+def main(args):
+    """
+    Dispatches to scraping or loading based on which flag was given.
+    Returns none.
+    """
+    if args.load:
+        _run_load(args)
+    else:
+        _run_scrape(args)
 
     return 0
 

@@ -1,10 +1,10 @@
 """
 `query_data.py`
 Prints answers for Part 2: SQL Query Analysis. Run directly
-(`python query_data.py --db_user <user> --db_password <password>`) to
-print every answer; `analyze` can also be imported and called on its own.
+(`python query_data.py`, with PGUSER/PGPASSWORD set) to print every
+answer; `analyze` can also be imported and called on its own.
 """
-import argparse
+import os
 from typing import Callable
 import psycopg
 from psycopg.rows import dict_row
@@ -47,7 +47,8 @@ def _format_q8(rows):
 
 def _format_q9(rows):
     r = rows[0]
-    return (f"PhD Computer Science at listed schools (LLM): {r['cnt_fall26_cs_phd_llm']}, "
+    return (f"PhD Computer Science at listed schools: {r['cnt_fall26_cs_phd_original']}, "
+            f"PhD Computer Science at listed schools (LLM): {r['cnt_fall26_cs_phd_llm']}, "
             f"Difference: {r['llm_less_original']:+d}")
 
 
@@ -310,18 +311,21 @@ def analyze(question_query: list[tuple[str, str, Callable[[list[dict]], str]]], 
         disconnect_db(conn)
 
 
-def parse_args():
+def _pg_credentials():
     """
-    Parses CLI arguments for running the Part 2 SQL analysis directly.
+    Reads database credentials from the PGUSER/PGPASSWORD environment
+    variables.
+    Returns a (user, password) tuple.
+    Raises EnvironmentError if either variable isn't set.
     """
-    parser = argparse.ArgumentParser(
-        description="Run the Part 2 SQL analysis queries and print each answer."
-    )
-    parser.add_argument("--db_user", required=True, help="Database username.")
-    parser.add_argument("--db_password", required=True, help="Database password.")
-    return parser.parse_args()
+    user = os.getenv("PGUSER")
+    password = os.getenv("PGPASSWORD")
+    if not user or not password:
+        raise EnvironmentError(
+            "Set the PGUSER and PGPASSWORD environment variables before running this script."
+        )
+    return user, password
 
 
 if __name__ == "__main__":
-    cli_args = parse_args()
-    analyze(QUESTION_QUERY, (cli_args.db_user, cli_args.db_password))
+    analyze(QUESTION_QUERY, _pg_credentials())

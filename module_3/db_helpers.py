@@ -75,30 +75,6 @@ def disconnect_db(conn):
         conn.close()
 
 
-def test_connection_db(conn_params: dict, credentials: tuple[str, str]):
-    """
-    Tests connectivity to the database described by conn_params.
-    Returns a list of table names in the public schema, or an empty list
-    if the connection failed.
-    """
-    conn = connect_db(conn_params, credentials)
-    if conn is None:
-        return []
-
-    try:
-        with conn.cursor() as cursor:
-            cursor.execute("SELECT current_user;")
-            print(f"Connected as: {cursor.fetchone()[0]}")
-
-            cursor.execute(
-                "SELECT table_name FROM information_schema.tables "
-                "WHERE table_schema = 'public';"
-            )
-            return [row[0] for row in cursor.fetchall()]
-    finally:
-        disconnect_db(conn)
-
-
 def pretty_print_query(query):
     """
     Formats a SQL query so each clause or special keyword (SELECT, FROM,

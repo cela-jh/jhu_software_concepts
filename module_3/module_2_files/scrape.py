@@ -6,6 +6,7 @@ the other functions here can also be imported on their own.
 """
 import argparse
 import functools
+import signal
 import sys
 import time
 import random
@@ -30,6 +31,20 @@ from data import save_data, validate_filepath, save_state, load_state, load_exis
 print = functools.partial(print, flush=True)
 
 RESTART_EVERY_N_PAGES = 500
+PULL_SEEN_LIMIT = 1000
+
+
+class StopRequested(BaseException):
+    """
+    Raised when a SIGTERM asks a running scrape to stop cleanly. A
+    BaseException rather than an Exception, like KeyboardInterrupt, so it
+    isn't swallowed by the broad except-Exception retry loops throughout
+    this file.
+    """
+
+
+def _handle_sigterm(signum, frame):
+    raise StopRequested()
 
 
 def create_profile_dir():
@@ -61,7 +76,6 @@ def _open_chrome(chrome_bin, profile_dir):
     return chrome_process
 
 
-
 def _try_debug_endpoint(host_port, retries=10):
     """
     Tries opening the debugging endpoint until open or reaching number of retries.
@@ -81,6 +95,7 @@ def _init_webdriver(host_port):
     """
     options = webdriver.ChromeOptions()
     options.debugger_address = host_port
+    options.page_load_strategy = "eager"
     options.add_experimental_option("prefs", {
         "profile.managed_default_content_settings.images": 2
     })
@@ -113,13 +128,75 @@ def cleanup_profile(profile_dir):
     shutil.rmtree(profile_dir)
 
 
+CLOUDFLARE_WAIT_TIMEOUT = 300
+CLOUDFLARE_POLL_INTERVAL = 3
+
+
+def _wait_for_cloudflare(driver, timeout=CLOUDFLARE_WAIT_TIMEOUT, poll_interval=CLOUDFLARE_POLL_INTERVAL):
+    """
+    Waits for a human to clear Cloudflare's challenge in the visible
+    Chrome window, polling the page title instead of blocking on keyboard
+    input, so this works whether scrape.py is run directly or as a
+    subprocess with no interactive terminal to type into.
+    Raises TimeoutError if the challenge isn't cleared within timeout.
+    Returns none.
+    """
+    print(f"Cloudflare check shown; complete it in the browser window. "
+          f"Waiting up to {timeout}s...")
+    waited = 0
+    while "Just a moment" in driver.title:
+        time.sleep(poll_interval)
+        waited += poll_interval
+        if waited >= timeout:
+            raise TimeoutError("Cloudflare check was not completed in time.")
+    print("Cloudflare check cleared; continuing.")
+
+
+AD_TRACKER_URL_PATTERNS = [
+    "*doubleclick.net*",
+    "*googlesyndication.com*",
+    "*adthrive.com*",
+    "*pubmatic.com*",
+    "*rubiconproject.com*",
+    "*casalemedia.com*",
+    "*openx.net*",
+    "*3lift.com*",
+    "*onetag-sys.com*",
+    "*presage.io*",
+    "*tapad.com*",
+    "*creativecdn.com*",
+    "*deepintent.com*",
+    "*bidr.io*",
+    "*smartadserver.com*",
+    "*2mdn.net*",
+    "*adtrafficquality.google*",
+    "*temu.com*",
+    "*recaptcha*",
+]
+
+
+def _block_ad_trackers(driver):
+    """
+    Blocks known ad and real-time-bidding tracker requests via Chrome
+    DevTools Protocol. GradCafe's page loads dozens of ad-auction and
+    cookie-sync iframes on every visit; since a fresh, cookie-less Chrome
+    profile is used for every scrape (needed for the Cloudflare
+    workaround), this full ad auction re-runs from scratch every time,
+    spawning enough renderer processes to stall the page for minutes.
+    None of this is needed to read the results table.
+    Returns none.
+    """
+    driver.execute_cdp_cmd("Network.enable", {})
+    driver.execute_cdp_cmd("Network.setBlockedURLs", {"urls": AD_TRACKER_URL_PATTERNS})
+
+
 def chrome_helper(url, host_port, chrome_bin, profile_dir, retries=5, base_retry_delay=15):
     """
     Helper to work around Cloudflare verification at url (GradCafe), using a
     persistent Chrome profile so a cleared session survives restarts.
-    Retries the initial navigation on transient errors, then only pauses for
-    manual input if a Cloudflare challenge is actually shown. Cleans up its
-    own spawned process if initialization fails partway through.
+    Retries the initial navigation on transient errors, then only waits for
+    manual completion if a Cloudflare challenge is actually shown. Cleans up
+    its own spawned process if initialization fails partway through.
     Returns resulting driver and Chrome process.
     """
     chrome_process = _open_chrome(chrome_bin, profile_dir)
@@ -127,7 +204,9 @@ def chrome_helper(url, host_port, chrome_bin, profile_dir, retries=5, base_retry
         http_host = "http://" + host_port
         _try_debug_endpoint(http_host)
         driver = _init_webdriver(host_port)
+        _block_ad_trackers(driver)
 
+        print("Loading GradCafe...")
         for attempt in range(1, retries + 1):
             try:
                 driver.get(url)
@@ -141,7 +220,7 @@ def chrome_helper(url, host_port, chrome_bin, profile_dir, retries=5, base_retry
                 time.sleep(retry_delay)
 
         if "Just a moment" in driver.title:
-            input("Complete Cloudflare check in browser. Then, press Enter: ")
+            _wait_for_cloudflare(driver)
     except Exception:
         terminate_process(chrome_process)
         raise
@@ -291,8 +370,15 @@ def parse_args():
         description="Scrape GradCafe admissions results into a JSON file."
     )
     parser.add_argument(
-        "--num_results", type=int, required=True,
-        help="Number of results to collect."
+        "--num_results", type=int, default=None,
+        help="Number of results to collect. If omitted, scrapes from page "
+        f"1 until {PULL_SEEN_LIMIT} consecutive already-seen results are "
+        "found, or until stopped."
+    )
+    parser.add_argument(
+        "--pull_seen_limit", type=int, default=PULL_SEEN_LIMIT,
+        help=f"Consecutive already-seen results that end a --num_results-less "
+        f"run (default: {PULL_SEEN_LIMIT}). Ignored with --num_results."
     )
     parser.add_argument(
         "--chrome_binary", type=Path, required=True,
@@ -307,11 +393,23 @@ def parse_args():
 
 def run_scrape(args):
     """
-    Scrapes GradCafe admissions results into a JSON file, resuming from
-    saved pagination state and skipping already-seen results when the
-    output file already exists.
+    Scrapes GradCafe admissions results into a JSON file.
+
+    With --num_results, resumes from saved pagination state and stops at
+    that many total results (or when there are no more pages).
+
+    Without --num_results ("pull mode"), always starts at page 1 and
+    ignores saved pagination state, since the goal is to catch newly
+    submitted entries rather than continue an earlier crawl. It stops
+    once --pull_seen_limit consecutive results already exist in the
+    output file (a sign this run has caught up to previously scraped
+    data), when there are no more pages, or when this process receives
+    SIGTERM (as sent by Flask's Cancel button), whichever comes first.
+    Whatever was already saved before stopping stays saved either way.
     Returns none.
     """
+    signal.signal(signal.SIGTERM, _handle_sigterm)
+
     validate_filepath(args.relative_filepath, must_exist=False)
 
     if not args.chrome_binary.is_file():
@@ -321,6 +419,8 @@ def run_scrape(args):
     if not check_robots_allowed(admissions_url):
         raise PermissionError(f"Scraping {admissions_url} is disallowed by robots.txt")
 
+    pull_mode = args.num_results is None
+
     # urls already on disk are the source of truth for how many unique
     # results exist and which ones to skip - this makes growing an
     # already-complete file safe even if the pagination state below is
@@ -329,19 +429,25 @@ def run_scrape(args):
     result_count = len(seen_urls)
 
     state_path = args.relative_filepath.with_suffix(".state.json")
-    state = load_state(state_path)
-    if state:
-        current_url = state["next_url"]
-        print(f"Resuming pagination from saved state ({result_count} unique results already in file).")
-    else:
+    if pull_mode:
         current_url = admissions_url
+        print(f"Pulling new results from page 1 until {args.pull_seen_limit} "
+              "consecutive already-seen results are found.")
+    else:
+        state = load_state(state_path)
+        if state:
+            current_url = state["next_url"]
+            print(f"Resuming pagination from saved state ({result_count} unique results already in file).")
+        else:
+            current_url = admissions_url
 
-    if result_count >= args.num_results:
-        print(f"Already have {result_count} results (>= requested {args.num_results}); nothing to do.")
-        return
+        if result_count >= args.num_results:
+            print(f"Already have {result_count} results (>= requested {args.num_results}); nothing to do.")
+            return
 
     chrome_process = None
     profile_dir = create_profile_dir()
+    consecutive_seen = 0
     try:
         driver, chrome_process = chrome_helper(
             admissions_url, "127.0.0.1:9222", args.chrome_binary, profile_dir
@@ -353,7 +459,7 @@ def run_scrape(args):
         # subsequent pages are reached by clicking "Next" inside scrape_data
         navigate_by_url = True
 
-        while result_count < args.num_results:
+        while pull_mode or result_count < args.num_results:
             admissions_results, next_page_url = scrape_data(
                 driver, current_url if navigate_by_url else None
             )
@@ -361,10 +467,14 @@ def run_scrape(args):
             parsed_results = clean_data(admissions_results, current_url)
             pages_completed += 1
 
-            # skip rows whose url is already on disk or already seen this
-            # run, so growing a file that a prior run already completed
-            # or pagination overlaps never adds duplicates
-            new_results = [r for r in parsed_results if r.get("url") not in seen_urls]
+            new_results = []
+            for result in parsed_results:
+                url = result.get("url")
+                if url in seen_urls:
+                    consecutive_seen += 1
+                else:
+                    consecutive_seen = 0
+                    new_results.append(result)
             seen_urls.update(r["url"] for r in new_results if r.get("url"))
             result_count += len(new_results)
 
@@ -378,27 +488,35 @@ def run_scrape(args):
                 f"{len(new_results)} new ({result_count} total unique so far)"
             )
 
+            if pull_mode and consecutive_seen >= args.pull_seen_limit:
+                print(f"Reached {consecutive_seen} consecutive already-seen results; stopping.")
+                break
+
             if next_page_url is None:
                 print(f"No additional pages available. Stopping at {result_count} results.")
-                state_path.unlink(missing_ok=True)
+                if not pull_mode:
+                    state_path.unlink(missing_ok=True)
                 break
 
-            # save pagination state even after reaching quota so later
-            # runs asking for more results resume near here instead of
-            # restarting the crawl from page 1
-            save_state({"next_url": next_page_url}, state_path)
+            if pull_mode:
+                print(f"Running total: {result_count}, {consecutive_seen} consecutive already-seen")
+            else:
+                # save pagination state even after reaching quota so later
+                # runs asking for more results resume near here instead of
+                # restarting the crawl from page 1
+                save_state({"next_url": next_page_url}, state_path)
 
-            if result_count >= args.num_results:
-                print(f"Scraping finished with {result_count} results.")
-                break
+                if result_count >= args.num_results:
+                    print(f"Scraping finished with {result_count} results.")
+                    break
 
-            avg_loop_time = (time.time() - total_start) / pages_completed
-            remaining_results = args.num_results - result_count
-            remaining_pages = -(-remaining_results // 20)  # ceiling division
-            eta_seconds = remaining_pages * avg_loop_time
-            print(
-                f"Running total: {result_count} (ETA: {format_duration(eta_seconds)})"
-            )
+                avg_loop_time = (time.time() - total_start) / pages_completed
+                remaining_results = args.num_results - result_count
+                remaining_pages = -(-remaining_results // 20)  # ceiling division
+                eta_seconds = remaining_pages * avg_loop_time
+                print(
+                    f"Running total: {result_count} (ETA: {format_duration(eta_seconds)})"
+                )
 
             current_url = next_page_url
 
@@ -413,6 +531,8 @@ def run_scrape(args):
 
         total_elapsed = round(time.time() - total_start, 0)
         print(f"Total scraping time: {format_duration(total_elapsed)}")
+    except StopRequested:
+        print("Stopping: cancellation requested. Results collected so far are already saved.")
     finally:
         if chrome_process is not None:
             terminate_process(chrome_process)

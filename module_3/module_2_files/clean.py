@@ -181,7 +181,7 @@ def _parse_groups(grouped_results, url):
         # parse main row
         main_row = group[0]
         main_row_parsed = _parse_main_row(main_row, url)
-        # parse subsequent rows (not implemented)
+        # parse subsequent tags and comments rows
         sub_rows = group[1]
         sub_rows_parsed = _parse_sub_rows(sub_rows)
         # concatenate dictionaries into a single result and append

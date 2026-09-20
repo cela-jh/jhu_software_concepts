@@ -1,8 +1,11 @@
 """
 `orm_queries.py`
 Repeats a subset of the Part 2 SQL analysis using the SQLAlchemy ORM
-instead of handwritten SQL.
+instead of handwritten SQL. Run directly (`python orm_queries.py`, with
+PGUSER/PGPASSWORD set) to print every answer.
 """
+import os
+
 from sqlalchemy import Numeric, and_, case, cast, func, or_, select
 from models import Applicant, get_session
 
@@ -158,7 +161,8 @@ def orm_q9(session):
         )
     ).scalar_one()
     difference = llm_count - original_count
-    return (f"PhD Computer Science at listed schools (LLM): {llm_count}, "
+    return (f"PhD Computer Science at listed schools: {original_count}, "
+            f"PhD Computer Science at listed schools (LLM): {llm_count}, "
             f"Difference: {difference:+d}")
 
 
@@ -226,3 +230,23 @@ def run_orm_queries(credentials: tuple[str, str]):
             print(question(session))
     finally:
         session.close()
+
+
+def _pg_credentials():
+    """
+    Reads database credentials from the PGUSER/PGPASSWORD environment
+    variables.
+    Returns a (user, password) tuple.
+    Raises EnvironmentError if either variable isn't set.
+    """
+    user = os.getenv("PGUSER")
+    password = os.getenv("PGPASSWORD")
+    if not user or not password:
+        raise EnvironmentError(
+            "Set the PGUSER and PGPASSWORD environment variables before running this script."
+        )
+    return user, password
+
+
+if __name__ == "__main__":
+    run_orm_queries(_pg_credentials())

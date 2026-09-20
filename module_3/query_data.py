@@ -1,7 +1,10 @@
 """
 `query_data.py`
-Prints answers for Part 2: SQL Query Analysis.
+Prints answers for Part 2: SQL Query Analysis. Run directly
+(`python query_data.py --db_user <user> --db_password <password>`) to
+print every answer; `analyze` can also be imported and called on its own.
 """
+import argparse
 from typing import Callable
 import psycopg
 from psycopg.rows import dict_row
@@ -305,3 +308,20 @@ def analyze(question_query: list[tuple[str, str, Callable[[list[dict]], str]]], 
                         print(f"Could not run '{question}': {error}")
     finally:
         disconnect_db(conn)
+
+
+def parse_args():
+    """
+    Parses CLI arguments for running the Part 2 SQL analysis directly.
+    """
+    parser = argparse.ArgumentParser(
+        description="Run the Part 2 SQL analysis queries and print each answer."
+    )
+    parser.add_argument("--db_user", required=True, help="Database username.")
+    parser.add_argument("--db_password", required=True, help="Database password.")
+    return parser.parse_args()
+
+
+if __name__ == "__main__":
+    cli_args = parse_args()
+    analyze(QUESTION_QUERY, (cli_args.db_user, cli_args.db_password))

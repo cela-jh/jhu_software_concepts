@@ -1,0 +1,52 @@
+/* USC red background, matching module_1's nav bar color */
+body {
+    font-family: Helvetica, sans-serif;
+    background-color: #990000;
+    color: #000000;
+    margin: 0;
+    padding: 40px;
+}
+
+/* small header above the page title */
+header {
+    font-size: 14px;
+    font-weight: bold;
+    color: #000000;
+    margin-bottom: 4px;
+}
+
+.divider {
+    border: none;
+    border-top: 1px solid #000000;
+    margin: 0 0 24px 0;
+}
+
+h1 {
+    color: #000000;
+    margin-top: 0;
+    margin-bottom: 24px;
+}
+
+.results {
+    display: flex;
+    flex-direction: column;
+    gap: 16px;
+    max-width: 800px;
+}
+
+/* USC gold, matching module_1's hover/accent color */
+.result-box {
+    background-color: #FFCC00;
+    border-radius: 8px;
+    padding: 16px 20px;
+}
+
+.question {
+    font-weight: bold;
+    margin: 0 0 8px 0;
+}
+
+.answer {
+    font-style: italic;
+    margin: 0;
+}

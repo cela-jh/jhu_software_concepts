@@ -1,8 +1,9 @@
 Cameron Ela, cela1@jh.edu
 Module 3, Database Queries Assignment
 
-NOTE: The database tooling here builds on the module_2 scraper, so `main.py`
-      is a single, complete app covering both scraping and database actions.
+NOTE: The database tooling here builds on the module_2 scraper. There is no
+      single combined entry point; scraping, loading, querying, and the
+      webpage are each run directly from their own file (see section 3).
 
 ================================================================================
 TABLE OF CONTENTS
@@ -23,28 +24,30 @@ TABLE OF CONTENTS
 ================================================================================
 1. OVERVIEW
 ================================================================================
-Three commands share one CLI entry point:
-main.py --scrape, main.py --load, or main.py --query.
-  1. Scrape publicly posted graduate admissions results from GradCafe
-     (thegradcafe.com/survey) into a JSON file (applicant_data.json).
-  2. Load a results file (applicant_data.json, or the LLM-standardized
-     llm_extend_applicant_data.json) into a PostgreSQL table called
-     applicants.
-  3. Run the Part 2 SQL analysis queries against the applicants table
-     and print each question's answer to the console.
+Four files, each independently executable, cover this module's work:
+  1. module_2_files/scrape.py -- Scrape publicly posted graduate
+     admissions results from GradCafe (thegradcafe.com/survey) into a
+     JSON file (applicant_data.json).
+  2. load_data.py -- Load a results file (applicant_data.json, or the
+     LLM-standardized llm_extend_applicant_data.json) into a PostgreSQL
+     table called applicants.
+  3. query_data.py -- Run the Part 2 SQL analysis queries against the
+     applicants table and print each question's answer to the console.
+  4. app.py -- A small Flask app that displays every analysis answer on
+     one webpage, reading them live through the SQLAlchemy Applicant
+     model instead of query_data.py's raw-SQL path.
 
 File tree (this README's own directory also holds venv/, requirements.txt,
 and applicant_data*.json, not listed below):
 
   module_3/
-  |-- main.py           : CLI entry point dispatching to scraping, loading,
-  |                        or querying
-  |-- load_data.py       : validates and loads a results file into PostgreSQL
+  |-- load_data.py       : validates and loads a results file into
+  |                        PostgreSQL; run directly to do so
   |-- db_helpers.py      : reusable PostgreSQL connect/disconnect helpers,
   |                        plus a standalone SQL pretty-printer (see section 5)
   |-- query_data.py      : the Part 2 questions, their SQL queries, a
   |                        formatter for each answer, and the function that
-  |                        runs them and prints each answer to the console
+  |                        runs them; run directly to print every answer
   |-- query_results.pdf  : Part 2 write-up, one section per question giving
   |                        its question text, final result, SQL query, and a
   |                        short explanation of what the query does and why
@@ -53,19 +56,30 @@ and applicant_data*.json, not listed below):
   |-- models.py          : SQLAlchemy Applicant model mapped to the same
   |                        applicants table, plus the engine/session used to
   |                        connect to it
-  |-- orm_queries.py     : repeats a subset of the Part 2 analysis using the
-  |                        SQLAlchemy ORM instead of handwritten SQL
+  |-- orm_queries.py     : the Part 2 analysis expressed with the SQLAlchemy
+  |                        ORM instead of handwritten SQL
+  |-- app.py             : starts the Flask server; run directly to do so
+  |-- app/               : the Flask presentation layer
+  |   |-- __init__.py     : builds the Flask app and registers its routes
+  |   |-- routes.py       : the analysis page route, read live through the ORM
+  |   |-- templates/
+  |   |   `-- analysis.html : the page template
+  |   `-- static/css/
+  |       `-- style.css     : the page's styling
   `-- module_2_files/    : everything reused as-is from module_2's scraper
-      |-- scrape.py       : browser automation and HTML/table extraction
+      |-- scrape.py       : browser automation, HTML/table extraction, and
+      |                     the scraping CLI; run directly to scrape
       |-- clean.py        : converts raw rows into structured dictionaries
       |-- data.py         : JSON persistence, resumable-crawl state, CLI
       |                     validation
       `-- llm_hosting/    : provided local-LLM standardizer, extended with
                             parallelization (see section 8)
 
-main.py adds module_2_files/ to its import path at startup, so it can still
-import scrape.py, clean.py, and data.py directly by name; none of those
-three files were changed to make this work.
+scrape.py imports clean.py and data.py directly by name; this works
+because Python adds a script's own directory to its import path when run
+directly, and all three files live together in module_2_files/. load_data.py
+does the same for data.py's validate_filepath from its own, separate
+directory, by adding module_2_files/ to its import path at startup.
 
 
 ================================================================================
@@ -86,42 +100,52 @@ three files were changed to make this work.
            Windows: C:\Program Files\Google\Chrome\Application\chrome.exe
            Linux:   usually `google-chrome` on PATH
     5. Set PostgreSQL credentials as environment variables (needed for
-       --load; see section 6 for why):
+       load_data.py and app.py; see section 6 for why):
            export PGUSER=your_postgres_user
            export PGPASSWORD=your_postgres_password
-    6. --query takes credentials directly as --db_user/--db_password CLI
-       arguments instead (see section 3).
+    6. query_data.py takes credentials directly as --db_user/--db_password
+       CLI arguments instead (see section 3).
 
 
 ================================================================================
 3. CLI USAGE
 ================================================================================
-Scraping:
-    python main.py --scrape --num_results <N> --chrome_binary "<path to Chrome>" [output.json]
+Each of the four commands below is run on its own; none of them depend
+on each other being invoked through a shared entry point.
+
+Scraping (from the module_3 folder):
+    python module_2_files/scrape.py --num_results <N> --chrome_binary "<path to Chrome>" [output.json]
     (--num_results is the cumulative target across the whole crawl,
-    including a resumed run's prior results, not "collect N more.")
+    including a resumed run's prior results, not "collect N more."
+    output.json is still resolved relative to module_3, not
+    module_2_files, since that's where the command is run from.)
 
     Example:
-    python main.py --scrape --num_results 30000 --chrome_binary "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome" applicant_data.json
+    python module_2_files/scrape.py --num_results 30000 --chrome_binary "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome" applicant_data.json
 
 Loading a results file into PostgreSQL:
-    PGUSER=youruser PGPASSWORD=yourpassword python main.py --load <file.json>
+    PGUSER=youruser PGPASSWORD=yourpassword python load_data.py <file.json>
 
     Example:
-    PGUSER=cameronela PGPASSWORD=mypassword python main.py --load llm_extend_applicant_data.json
+    PGUSER=cameronela PGPASSWORD=mypassword python load_data.py llm_extend_applicant_data.json
 
 Running the Part 2 SQL analysis queries:
-    python main.py --query --db_user <user> --db_password <password>
+    python query_data.py --db_user <user> --db_password <password>
 
     Example:
-    python main.py --query --db_user cameronela --db_password mypassword
+    python query_data.py --db_user cameronela --db_password mypassword
 
     (--db_user/--db_password are read directly from these CLI flags rather
     than environment variables, since this command is only ever run
     interactively by a person who already has the values in hand; unlike
-    --load, its credentials will appear in shell history)
+    load_data.py, its credentials will appear in shell history)
 
-    (--scrape, --load, and --query are mutually exclusive and one is required)
+Running the analysis webpage:
+    PGUSER=youruser PGPASSWORD=yourpassword python app.py
+
+    Then open http://127.0.0.1:5000/ in a browser. Every answer on the
+    page is read live from PostgreSQL through the SQLAlchemy Applicant
+    model each time the page loads.
 
 Steps to run a scrape:
     1. Run the scrape command above. A separate, real Chrome window opens
@@ -226,6 +250,23 @@ scrape.py
     JavaScript so the click carries a normal-looking referring page and
     isn't blocked by an overlapping ad, and returns the rows read plus the
     resulting next-page URL (or None once there is no further page).
+  - format_duration(seconds) -- Converts a number of seconds into a
+    readable "Xh Ym Zs" string, used for the progress and timing messages
+    printed while scraping.
+  - parse_args() -- Defines this file's own CLI: --num_results and
+    --chrome_binary are required, and a positional filepath is used as
+    the output file (default `applicant_data.json`).
+  - run_scrape(args). Confirms the Chrome binary path is
+    valid and that scraping is allowed by robots.txt, then resumes from
+    any saved pagination state and the set of urls already in the output
+    file so re-running never adds duplicates. It then repeatedly scrapes
+    a page, cleans it, appends any genuinely new results, saves updated
+    pagination state, and moves to the next page - printing a running
+    total and an estimated completion time - until the requested count is
+    reached or there are no more pages, periodically restarting the
+    browser to clear accumulated session state, and always shutting the
+    browser down cleanly when finished or if an error occurs. Run
+    automatically when this file is executed directly.
 
 clean.py
 -----------
@@ -270,7 +311,7 @@ db_helpers.py
   - pretty_print_query(query) -- Reformats a SQL query string so each
     clause or keyword (SELECT, FROM, WHERE, GROUP BY, AND, etc.) starts
     its own line in uppercase. Available as a standalone formatting
-    utility; not currently called by --query.
+    utility; not currently called by query_data.py.
 
 load_data.py
 ---------------
@@ -293,6 +334,11 @@ load_data.py
     of losing every row around it. The connection is always closed before
     the function returns, and a summary of how many results were newly
     loaded, updated, or skipped is printed at the end.
+  - parse_args() -- Defines this file's own CLI: a single optional
+    positional filepath (default `applicant_data.json`). When this file
+    is executed directly, PGUSER/PGPASSWORD are read from the environment
+    (printing a message and exiting instead of connecting if either is
+    unset) and passed to load_data() as a credentials tuple.
 
 query_data.py
 ----------------
@@ -309,6 +355,10 @@ function turning that question's raw rows into its printed answer line
     printed in place of an answer without aborting the connection or
     preventing the remaining questions from still being run. The
     connection is always closed before the function returns.
+  - parse_args() -- Defines this file's own CLI: --db_user and
+    --db_password are both required. When this file is executed
+    directly, they're bundled into a credentials tuple and passed to
+    analyze() along with QUESTION_QUERY.
 
 models.py
 ------------
@@ -324,43 +374,37 @@ models.py
 
 orm_queries.py
 -----------------
-  - orm_q1, orm_q4, orm_q5, orm_q8, orm_q9, orm_a1 -- Each repeats the
-    matching Part 2 question (Q1, Q4, Q5, Q8, Q9, and original question
-    A1) using SQLAlchemy's select()/where()/func()/and_()/or_() instead
-    of handwritten SQL, and returns the same formatted answer line as
-    its query_data.py counterpart.
+  - orm_q1 through orm_q9, orm_a1, orm_a2 -- Each repeats the matching
+    Part 2 question using SQLAlchemy's select()/where()/func()/and_()/
+    or_() instead of handwritten SQL, and returns the same formatted
+    answer line as its query_data.py counterpart. ALL_ORM_ANSWERS lists
+    all eleven in Q1-Q9, A1, A2 order, for app.py; ORM_QUESTIONS lists
+    just Q1, Q4, Q5, Q8, Q9, and A1, for run_orm_queries() below.
   - run_orm_queries(credentials). Opens a session, prints the
-    answer from each of the functions above, and closes the session
+    answer from each function in ORM_QUESTIONS, and closes the session
     afterward.
 
-main.py
-----------
-  - format_duration(seconds) -- Converts a number of seconds into a
-    readable "Xh Ym Zs" string, used for the progress and timing messages
-    printed while scraping.
-  - parse_args() -- Defines the CLI: exactly one of --scrape, --load, or
-    --query is required, --num_results and --chrome_binary apply to
-    --scrape, --db_user and --db_password apply to --query, and a
-    positional filepath is used as the output file when scraping or the
-    input file when loading.
-  - main(args). Dispatches based on which flag was given.
-    With --load, it confirms the input file exists, reads PostgreSQL
-    credentials from the PGUSER and PGPASSWORD environment variables
-    (printing a message and doing nothing further if either is unset),
-    bundles them into a credentials tuple, and hands off to the database
-    loader. With --query, it confirms --db_user and --db_password were
-    both given, bundles them into a credentials tuple, and hands off to
-    the SQL analysis together with QUESTION_QUERY from query_data.py.
-    With --scrape, it confirms the Chrome binary path is
-    valid and that scraping is allowed by robots.txt, then resumes from
-    any saved pagination state and the set of urls already in the output
-    file so re-running never adds duplicates. It then repeatedly scrapes
-    a page, cleans it, appends any genuinely new results, saves updated
-    pagination state, and moves to the next page - printing a running
-    total and an estimated completion time - until the requested count is
-    reached or there are no more pages, periodically restarting the
-    browser to clear accumulated session state, and always shutting the
-    browser down cleanly when finished or if an error occurs.
+app.py imports the Flask app instance from app/ and runs it; the app
+itself lives in that package.
+
+app/__init__.py
+------------------
+  - create_app() -- Builds the Flask app and registers its blueprint.
+
+app/routes.py
+----------------
+  - analysis() -- The route for "/". Reads PGUSER/PGPASSWORD from the
+    environment (returning a plain error message instead of a stack
+    trace if either is unset), opens a SQLAlchemy session, runs every
+    function in orm_queries.ALL_ORM_ANSWERS against it, pairs each
+    answer with its question text from query_data.py, and renders
+    analysis.html with the results. The session is always closed before
+    the function returns. Every answer is read fresh from PostgreSQL on
+    each page load.
+
+There is no main.py; scrape.py, load_data.py, query_data.py, and app.py
+each define their own parse_args() (or, for app.py, take no CLI
+arguments) and run when executed directly, as documented above.
 
 
 ================================================================================
@@ -368,7 +412,7 @@ main.py
 ================================================================================
 Table schema
 ---------------
-The applicants table must already exist before running --load:
+The applicants table must already exist before running load_data.py:
 
     CREATE TABLE IF NOT EXISTS applicants (
         p_id INTEGER PRIMARY KEY,
@@ -400,12 +444,13 @@ Credentials
 --------------
 To avoid ever committing a database password or other secret, PostgreSQL
 credentials are never hardcoded and are always passed around as a
-(user, password) tuple rather than as separate arguments. For --load they are read at runtime from the PGUSER and
-PGPASSWORD environment variables rather than a CLI flag, since a flag
-would be visible in shell history. --query instead takes --db_user and
+(user, password) tuple rather than as separate arguments. load_data.py
+and app.py read them at runtime from the PGUSER and PGPASSWORD
+environment variables rather than a CLI flag, since a flag would be
+visible in shell history. query_data.py instead takes --db_user and
 --db_password directly as CLI arguments, since that command is run
 interactively by someone who already has the credentials in hand; this
-means its credentials do appear in shell history, unlike --load's.
+means its credentials do appear in shell history, unlike the others'.
 CONN_PARAMS (dbname/host/port) is not a secret and stays as a plain
 constant in db_helpers.py.
 
@@ -623,7 +668,7 @@ code and captured in screenshot.jpg (this folder), confirming `/survey` is
 not disallowed. This is also enforced automatically on every run:
 scrape.py's check_robots_allowed() fetches and parses the live robots.txt
 via urllib.robotparser and checks can_fetch("*", admissions_url) before
-any browser is launched; if disallowed, main.py raises immediately and
+any browser is launched; if disallowed, scrape.py raises immediately and
 nothing is scraped. Only the public `/survey` results listing is accessed.
 
 

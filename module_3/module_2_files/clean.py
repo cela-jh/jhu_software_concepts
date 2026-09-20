@@ -1,7 +1,7 @@
 """
 `clean.py`
-This module contains a function for cleaning and parsing admissions results 
-from GradCafe. The `parse_results` function is run in `main.py`.
+Cleans and parses admissions results scraped from GradCafe. `clean_data`
+is called from scrape.py.
 """
 import re
 from urllib.parse import urljoin

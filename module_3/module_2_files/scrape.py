@@ -1,14 +1,18 @@
 """
 `scrape.py`
-This module contains a function for scraping admissions results from GradCafe. 
-The `scrape_data` function is run in `main.py`.
+Scrapes admissions results from GradCafe into a JSON file. Run directly
+(`python scrape.py [options] [output.json]`) to scrape; `scrape_data` and
+the other functions here can also be imported on their own.
 """
+import argparse
+import functools
 import sys
 import time
 import random
 import tempfile
 import shutil
 import subprocess
+from pathlib import Path
 from urllib.request import urlopen, Request
 from urllib.error import HTTPError, URLError
 from urllib.parse import urljoin, urlparse
@@ -17,6 +21,15 @@ from selenium import webdriver
 from selenium.webdriver.common.by import By
 from selenium.common.exceptions import NoSuchElementException
 from bs4 import BeautifulSoup
+
+from clean import clean_data
+from data import save_data, validate_filepath, save_state, load_state, load_existing_urls
+
+# Force every print() in this process to flush immediately for logging purposes.
+# Helps prevent making a script that is working look hung.
+print = functools.partial(print, flush=True)
+
+RESTART_EVERY_N_PAGES = 500
 
 
 def create_profile_dir():
@@ -253,4 +266,158 @@ def scrape_data(driver, url=None):
     next_page_url = _click_next_page(driver)
 
     return results, next_page_url
-    
+
+
+def format_duration(seconds):
+    """
+    Converts seconds to hours, minutes, seconds for loop/script execution.
+    """
+    hours, remainder = divmod(int(seconds), 3600)
+    minutes, secs = divmod(remainder, 60)
+
+    if minutes == 0 and hours == 0:
+        return f"{secs}s"
+    elif minutes > 0 and hours == 0:
+        return f"{minutes}m {secs}s"
+
+    return f"{hours}h {minutes}m {round(secs, 0)}s"
+
+
+def parse_args():
+    """
+    Parses CLI arguments for scraping GradCafe admissions results directly.
+    """
+    parser = argparse.ArgumentParser(
+        description="Scrape GradCafe admissions results into a JSON file."
+    )
+    parser.add_argument(
+        "--num_results", type=int, required=True,
+        help="Number of results to collect."
+    )
+    parser.add_argument(
+        "--chrome_binary", type=Path, required=True,
+        help="Absolute path to the system Chrome binary."
+    )
+    parser.add_argument(
+        "relative_filepath", type=Path, nargs="?", default=Path("applicant_data.json"),
+        help="File to save results to (default: `applicant_data.json`)"
+    )
+    return parser.parse_args()
+
+
+def run_scrape(args):
+    """
+    Scrapes GradCafe admissions results into a JSON file, resuming from
+    saved pagination state and skipping already-seen results when the
+    output file already exists.
+    Returns none.
+    """
+    validate_filepath(args.relative_filepath, must_exist=False)
+
+    if not args.chrome_binary.is_file():
+        raise FileNotFoundError(f"'{args.chrome_binary}' is not a valid Chrome binary path.")
+
+    admissions_url = "https://www.thegradcafe.com/survey"
+    if not check_robots_allowed(admissions_url):
+        raise PermissionError(f"Scraping {admissions_url} is disallowed by robots.txt")
+
+    # urls already on disk are the source of truth for how many unique
+    # results exist and which ones to skip - this makes growing an
+    # already-complete file safe even if the pagination state below is
+    # stale, missing, or points back at page 1
+    seen_urls = load_existing_urls(args.relative_filepath)
+    result_count = len(seen_urls)
+
+    state_path = args.relative_filepath.with_suffix(".state.json")
+    state = load_state(state_path)
+    if state:
+        current_url = state["next_url"]
+        print(f"Resuming pagination from saved state ({result_count} unique results already in file).")
+    else:
+        current_url = admissions_url
+
+    if result_count >= args.num_results:
+        print(f"Already have {result_count} results (>= requested {args.num_results}); nothing to do.")
+        return
+
+    chrome_process = None
+    profile_dir = create_profile_dir()
+    try:
+        driver, chrome_process = chrome_helper(
+            admissions_url, "127.0.0.1:9222", args.chrome_binary, profile_dir
+        )
+
+        pages_completed = 0
+        total_start = time.time()
+        # first page (fresh or resumed) needs an explicit URL navigation;
+        # subsequent pages are reached by clicking "Next" inside scrape_data
+        navigate_by_url = True
+
+        while result_count < args.num_results:
+            admissions_results, next_page_url = scrape_data(
+                driver, current_url if navigate_by_url else None
+            )
+            navigate_by_url = False
+            parsed_results = clean_data(admissions_results, current_url)
+            pages_completed += 1
+
+            # skip rows whose url is already on disk or already seen this
+            # run, so growing a file that a prior run already completed
+            # or pagination overlaps never adds duplicates
+            new_results = [r for r in parsed_results if r.get("url") not in seen_urls]
+            seen_urls.update(r["url"] for r in new_results if r.get("url"))
+            result_count += len(new_results)
+
+            if new_results:
+                save_data(new_results, args.relative_filepath)
+
+            # printed unconditionally for every page whether data was written
+            # or not, so read pages are always visible even when they add nothing new
+            print(
+                f"Page {pages_completed}: read {len(parsed_results)}, "
+                f"{len(new_results)} new ({result_count} total unique so far)"
+            )
+
+            if next_page_url is None:
+                print(f"No additional pages available. Stopping at {result_count} results.")
+                state_path.unlink(missing_ok=True)
+                break
+
+            # save pagination state even after reaching quota so later
+            # runs asking for more results resume near here instead of
+            # restarting the crawl from page 1
+            save_state({"next_url": next_page_url}, state_path)
+
+            if result_count >= args.num_results:
+                print(f"Scraping finished with {result_count} results.")
+                break
+
+            avg_loop_time = (time.time() - total_start) / pages_completed
+            remaining_results = args.num_results - result_count
+            remaining_pages = -(-remaining_results // 20)  # ceiling division
+            eta_seconds = remaining_pages * avg_loop_time
+            print(
+                f"Running total: {result_count} (ETA: {format_duration(eta_seconds)})"
+            )
+
+            current_url = next_page_url
+
+            # periodic restart to clear accumulated browser session state
+            if pages_completed % RESTART_EVERY_N_PAGES == 0:
+                print("Restarting Chrome to clear accumulated session state...")
+                terminate_process(chrome_process)
+                driver, chrome_process = chrome_helper(
+                    admissions_url, "127.0.0.1:9222", args.chrome_binary, profile_dir
+                )
+                navigate_by_url = True
+
+        total_elapsed = round(time.time() - total_start, 0)
+        print(f"Total scraping time: {format_duration(total_elapsed)}")
+    finally:
+        if chrome_process is not None:
+            terminate_process(chrome_process)
+        cleanup_profile(profile_dir)
+
+
+if __name__ == "__main__":
+    run_scrape(parse_args())

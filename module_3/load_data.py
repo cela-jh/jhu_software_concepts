@@ -1,10 +1,16 @@
 """
 `load_data.py`
-Takes cleaned applicant data and loads it into a PostgreSQL database
+Takes cleaned applicant data and loads it into a PostgreSQL database. Run
+directly (`python load_data.py [file.json]`) to load a file; `load_data`
+can also be imported and called on its own.
 """
+import argparse
 import json
+import os
 import re
+import sys
 from datetime import datetime
+from pathlib import Path
 import psycopg
 from db_helpers import connect_db, disconnect_db, CONN_PARAMS
 
@@ -332,3 +338,35 @@ def load_data(filepath, credentials: tuple[str, str]):
 
     print(f"Loaded {loaded} new results. Updated {updated} existing results with "
           f"new field values. Skipped {skipped_invalid} with missing or invalid fields.")
+
+
+def parse_args():
+    """
+    Parses CLI arguments for loading a results file into PostgreSQL
+    directly.
+    """
+    parser = argparse.ArgumentParser(
+        description="Load a results file into the PostgreSQL applicants table."
+    )
+    parser.add_argument(
+        "relative_filepath", type=Path, nargs="?", default=Path("applicant_data.json"),
+        help="File to load into PostgreSQL (default: `applicant_data.json`)"
+    )
+    return parser.parse_args()
+
+
+if __name__ == "__main__":
+    # data.py lives in module_2_files/, alongside scrape.py and clean.py.
+    sys.path.insert(0, str(Path(__file__).resolve().parent / "module_2_files"))
+    from data import validate_filepath
+
+    cli_args = parse_args()
+    validate_filepath(cli_args.relative_filepath, must_exist=True)
+
+    pg_user = os.getenv("PGUSER")
+    pg_password = os.getenv("PGPASSWORD")
+    if not pg_user or not pg_password:
+        print("Set the PGUSER and PGPASSWORD environment variables before running load_data.py.")
+        sys.exit(1)
+
+    load_data(cli_args.relative_filepath, (pg_user, pg_password))

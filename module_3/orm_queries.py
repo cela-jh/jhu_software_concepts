@@ -30,6 +30,34 @@ def orm_q1(session):
     return f"Applicant count: {count}"
 
 
+def orm_q2(session):
+    """Percentage of entries with a usable nationality classification that are international."""
+    international = case((Applicant.us_or_international == "International", 1), else_=0)
+    pct = session.execute(
+        select(_round2(func.sum(international) * 100.0 / func.count(Applicant.us_or_international)))
+        .where(Applicant.us_or_international.is_not(None))
+    ).scalar_one()
+    return f"International percentage: {pct}%"
+
+
+def orm_q3(session):
+    """Average GPA, GRE Quantitative, GRE Verbal, and GRE Analytical Writing scores."""
+    avg_gpa = session.execute(
+        select(_round2(func.avg(Applicant.gpa))).where(Applicant.gpa.is_not(None))
+    ).scalar_one()
+    avg_gre = session.execute(
+        select(_round2(func.avg(Applicant.gre))).where(Applicant.gre.is_not(None))
+    ).scalar_one()
+    avg_gre_v = session.execute(
+        select(_round2(func.avg(Applicant.gre_v))).where(Applicant.gre_v.is_not(None))
+    ).scalar_one()
+    avg_gre_aw = session.execute(
+        select(_round2(func.avg(Applicant.gre_aw))).where(Applicant.gre_aw.is_not(None))
+    ).scalar_one()
+    return (f"Average GPA: {avg_gpa}, Average GRE: {avg_gre}, "
+            f"Average GRE V: {avg_gre_v}, Average GRE AW: {avg_gre_aw}")
+
+
 def orm_q4(session):
     """Average GPA of American applicants who applied for Fall 2026."""
     avg_gpa = session.execute(
@@ -53,6 +81,40 @@ def orm_q5(session):
         .where(Applicant.term == "Fall 2025")
     ).scalar_one()
     return f"Percentage accepted: {pct}%"
+
+
+def orm_q6(session):
+    """Average GPA of accepted applicants who applied for Fall 2026."""
+    avg_gpa = session.execute(
+        select(_round2(func.avg(Applicant.gpa)))
+        .where(
+            and_(
+                Applicant.term == "Fall 2026",
+                Applicant.gpa.is_not(None),
+                Applicant.status.ilike("Accepted%"),
+            )
+        )
+    ).scalar_one()
+    return f"Average GPA accepted: {avg_gpa}"
+
+
+def orm_q7(session):
+    """Count of Johns Hopkins University master's Computer Science entries."""
+    count = session.execute(
+        select(func.count())
+        .select_from(Applicant)
+        .where(
+            and_(
+                Applicant.degree.ilike("Masters"),
+                Applicant.program.ilike("Computer Science, %"),
+                or_(
+                    Applicant.program.ilike("%, Johns Hopkins University%"),
+                    Applicant.program.ilike("%, JHU%"),
+                ),
+            )
+        )
+    ).scalar_one()
+    return f"JHU Masters Computer Science count: {count}"
 
 
 def _q8_count(session):
@@ -124,7 +186,32 @@ def orm_a1(session):
     return ", ".join(parts)
 
 
+def orm_a2(session):
+    """Average GPA for USC applicants who were accepted versus not, and the difference."""
+    usc_match = or_(
+        Applicant.program.ilike("%, University of Southern California"),
+        Applicant.program.ilike("%, USC"),
+    )
+    accepted_avg = session.execute(
+        select(_round2(func.avg(Applicant.gpa)))
+        .where(and_(Applicant.gpa.is_not(None), usc_match, Applicant.status.ilike("Accepted%")))
+    ).scalar_one()
+    not_accepted_avg = session.execute(
+        select(_round2(func.avg(Applicant.gpa)))
+        .where(and_(Applicant.gpa.is_not(None), usc_match, Applicant.status.not_ilike("Accepted%")))
+    ).scalar_one()
+    difference = accepted_avg - not_accepted_avg
+    return (f"USC average GPA accepted: {accepted_avg}, "
+            f"USC average GPA not accepted: {not_accepted_avg}, "
+            f"Difference: {difference}")
+
+
 ORM_QUESTIONS = [orm_q1, orm_q4, orm_q5, orm_q8, orm_q9, orm_a1]
+
+ALL_ORM_ANSWERS = [
+    orm_q1, orm_q2, orm_q3, orm_q4, orm_q5,
+    orm_q6, orm_q7, orm_q8, orm_q9, orm_a1, orm_a2,
+]
 
 
 def run_orm_queries(credentials: tuple[str, str]):

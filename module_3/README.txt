@@ -1,5 +1,5 @@
 Cameron Ela, cela1@jh.edu
-Module Info: Module 3 - Database Queries Assignmemt, Due: [FILL IN due date]
+Module Info: Module 3 - Database Queries Assignmemt, Due: 20 September 2026
 NOTE: Module 3 is built on top of module 2. Information about module 2
       functionalities is included so `main` is a complete app with scraping and
       database actions.
@@ -22,23 +22,34 @@ TABLE OF CONTENTS
 ================================================================================
 1. OVERVIEW
 ================================================================================
-This module has two functions, both driven from one CLI entry point
-(main.py --scrape or main.py --load):
+This module has three functions, all driven from one CLI entry point
+(main.py --scrape, main.py --load, or main.py --query):
   1. Scrape publicly posted graduate admissions results from GradCafe
      (thegradcafe.com/survey) into a JSON file (applicant_data.json).
   2. Load a results file (applicant_data.json, or the LLM-standardized
      llm_extend_applicant_data.json) into a PostgreSQL table called
      applicants.
+  3. Run the Part 2 SQL analysis queries against the applicants table
+     and print each question's answer to the console.
 
 Files:
   - scrape.py        : browser automation and HTML/table extraction
   - clean.py          : converts raw rows into structured dictionaries
   - data.py           : JSON persistence, resumable-crawl state, CLI validation
-  - db_connection.py  : reusable PostgreSQL connect/disconnect helpers
-  - load_data.py       : validates and loads a results file into PostgreSQL
-  - main.py           : CLI entry point dispatching to scraping or loading
+  - db_helpers.py     : reusable PostgreSQL connect/disconnect helpers, plus
+    a standalone SQL pretty-printer (see section 5)
+  - load_data.py      : validates and loads a results file into PostgreSQL
+  - query_data.py     : the Part 2 questions, their SQL queries, a
+    formatter for each answer, and the function that runs them and prints
+    each answer to the console
+  - main.py           : CLI entry point dispatching to scraping, loading, or
+    querying
   - llm_hosting/       : provided local-LLM standardizer, extended with
     parallelization (see section 7)
+  - query_results.pdf : Part 2 write-up, one section per question giving
+    its question text, final result, SQL query, and a short explanation
+    of what the query does and why it answers the question (written by
+    hand, independent of query_data.py's console output)
 
 
 ================================================================================
@@ -62,6 +73,8 @@ Files:
        --load; see section 6 for why):
            export PGUSER=your_postgres_user
            export PGPASSWORD=your_postgres_password
+    6. --query takes credentials directly as --db_user/--db_password CLI
+       arguments instead (see section 3).
 
 
 ================================================================================
@@ -81,7 +94,18 @@ Loading a results file into PostgreSQL:
     Example:
     PGUSER=cameronela PGPASSWORD=mypassword python main.py --load llm_extend_applicant_data.json
 
-    (--scrape and --load are mutually exclusive and one is required)
+Running the Part 2 SQL analysis queries:
+    python main.py --query --db_user <user> --db_password <password>
+
+    Example:
+    python main.py --query --db_user cameronela --db_password mypassword
+
+    (--db_user/--db_password are read directly from these CLI flags rather
+    than environment variables, since this command is only ever run
+    interactively by a person who already has the values in hand; unlike
+    --load, its credentials will appear in shell history)
+
+    (--scrape, --load, and --query are mutually exclusive and one is required)
 
 Steps to run a scrape:
     1. Run the scrape command above. A separate, real Chrome window opens
@@ -125,6 +149,16 @@ Steps to run a load into PostgreSQL:
     7. A final summary line reports how many results were newly loaded,
        how many existing results were updated, and how many were skipped
        for having missing or invalid fields.
+
+Steps to run the Part 2 SQL analysis:
+    1. Make sure the applicants table already exists and is loaded (see
+       above).
+    2. Run the query command above with your own --db_user/--db_password.
+    3. Each question's answer is printed to the console on its own line,
+       using a short label (for example "Applicant count: 32544").
+    4. If one question's query fails (for example a syntax error), its
+       error is printed in place of an answer and the remaining questions
+       are still run, instead of stopping the whole analysis.
 
 
 ================================================================================
@@ -206,21 +240,28 @@ data.py
     the small sidecar file recording where pagination left off, so an
     interrupted scrape resumes instead of restarting from page 1.
 
-db_connection.py
--------------------
-  - connect_db(conn_params, user, password) -- REQUIRED. Opens and
-    returns a PostgreSQL connection, printing a clear message and
-    returning None instead of raising if the connection fails.
+db_helpers.py
+----------------
+  - connect_db(conn_params, credentials) -- REQUIRED. Opens and returns a
+    PostgreSQL connection using a (user, password) credentials tuple,
+    printing a clear message naming every connection parameter (database
+    name, host, port, username, password) and returning None instead of
+    raising if the connection fails.
   - disconnect_db(conn) -- Closes a connection opened by connect_db.
-  - test_connection_db(conn_params, user, password) -- Opens a
-    connection, prints which user it connected as, and returns the list
-    of table names in the database's public schema, closing the
-    connection before returning.
+  - test_connection_db(conn_params, credentials) -- Opens a connection,
+    prints which user it connected as, and returns the list of table
+    names in the database's public schema, closing the connection before
+    returning.
+  - pretty_print_query(query) -- Reformats a SQL query string so each
+    clause or keyword (SELECT, FROM, WHERE, GROUP BY, AND, etc.) starts
+    its own line in uppercase. Available as a standalone formatting
+    utility; not currently called by --query.
 
 load_data.py
 ---------------
-  - load_data(filepath, user, password) -- REQUIRED. Reads the given JSON
-    file and connects to the database. For every result, it checks that
+  - load_data(filepath, credentials) -- REQUIRED. Takes a (user,
+    password) credentials tuple, reads the given JSON file, and connects
+    to the database. For every result, it checks that
     program, date added, url, status, term, nationality, and degree are
     all present, converts the date and any GPA/GRE badge text into real
     numbers and dates, and leaves genuinely optional fields (GPA, GRE
@@ -238,30 +279,50 @@ load_data.py
     the function returns, and a summary of how many results were newly
     loaded, updated, or skipped is printed at the end.
 
+query_data.py
+----------------
+Holds QUESTION_QUERY, the list of (question, query, format_result)
+tuples for the Part 2 SQL analysis, where each query is the complete,
+executable SQL for that question and each format_result is a small
+function turning that question's raw rows into its printed answer line
+(for example "Applicant count: 32544").
+  - analyze(question_query, credentials) -- REQUIRED. Takes QUESTION_QUERY
+    (or any list shaped like it) and a (user, password) credentials
+    tuple, connects to the database, runs each query, and prints its
+    answer using format_result. Each query runs inside its own savepoint,
+    so a query that fails (for example a syntax error) has its error
+    printed in place of an answer without aborting the connection or
+    preventing the remaining questions from still being run. The
+    connection is always closed before the function returns.
+
 main.py
 ----------
   - format_duration(seconds) -- Converts a number of seconds into a
     readable "Xh Ym Zs" string, used for the progress and timing messages
     printed while scraping.
-  - parse_args() -- Defines the CLI: exactly one of --scrape or --load is
-    required, --num_results and --chrome_binary apply to --scrape, and a
+  - parse_args() -- Defines the CLI: exactly one of --scrape, --load, or
+    --query is required, --num_results and --chrome_binary apply to
+    --scrape, --db_user and --db_password apply to --query, and a
     positional filepath is used as the output file when scraping or the
     input file when loading.
   - main(args) -- REQUIRED. Dispatches based on which flag was given.
     With --load, it confirms the input file exists, reads PostgreSQL
     credentials from the PGUSER and PGPASSWORD environment variables
     (printing a message and doing nothing further if either is unset),
-    and hands off to the database loader. With --scrape, it confirms the
-    Chrome binary path is valid and that scraping is allowed by
-    robots.txt, then resumes from any saved pagination state and the set
-    of urls already in the output file so re-running never adds
-    duplicates. It then repeatedly scrapes a page, cleans it, appends any
-    genuinely new results, saves updated pagination state, and moves to
-    the next page - printing a running total and an estimated completion
-    time - until the requested count is reached or there are no more
-    pages, periodically restarting the browser to clear accumulated
-    session state, and always shutting the browser down cleanly when
-    finished or if an error occurs.
+    bundles them into a credentials tuple, and hands off to the database
+    loader. With --query, it confirms --db_user and --db_password were
+    both given, bundles them into a credentials tuple, and hands off to
+    the SQL analysis together with QUESTION_QUERY from query_data.py.
+    With --scrape, it confirms the Chrome binary path is
+    valid and that scraping is allowed by robots.txt, then resumes from
+    any saved pagination state and the set of urls already in the output
+    file so re-running never adds duplicates. It then repeatedly scrapes
+    a page, cleans it, appends any genuinely new results, saves updated
+    pagination state, and moves to the next page - printing a running
+    total and an estimated completion time - until the requested count is
+    reached or there are no more pages, periodically restarting the
+    browser to clear accumulated session state, and always shutting the
+    browser down cleanly when finished or if an error occurs.
 
 
 ================================================================================
@@ -300,11 +361,16 @@ than the application having to check first.
 Credentials
 --------------
 Per the assignment's requirement not to commit database passwords or
-other secrets, PostgreSQL credentials are never hardcoded or passed as
-CLI arguments (a CLI flag would be visible in shell history). They are
-read at runtime from PGUSER and PGPASSWORD environment variables inside
-main.py's --load handling; CONN_PARAMS (dbname/host/port) is not a
-secret and stays as a plain constant in db_connection.py.
+other secrets, PostgreSQL credentials are never hardcoded and are always
+passed around as a (user, password) tuple rather than as separate
+arguments. For --load they are read at runtime from the PGUSER and
+PGPASSWORD environment variables rather than a CLI flag, since a flag
+would be visible in shell history. --query instead takes --db_user and
+--db_password directly as CLI arguments, since that command is run
+interactively by someone who already has the credentials in hand; this
+means its credentials do appear in shell history, unlike --load's.
+CONN_PARAMS (dbname/host/port) is not a secret and stays as a plain
+constant in db_helpers.py.
 
 Validation and missing values
 ---------------------------------
@@ -464,8 +530,8 @@ nothing is scraped. Only the public `/survey` results listing is accessed.
 ================================================================================
 10. CITATIONS
 ================================================================================
-- CLAUDE: Used primarily as an advisor and guide. Considered edge cases and
-  helped developed error catching methods. Built out parallelization for LLM
-  and save and load states for both LLM and scraping. Audited `module_2` and
-  the PostgreSQL loading functionality for completeness based off of
+- CLAUDE: Used primarily as an advisor, guide, and error catcher. Considered edge
+  cases and helped developed error catching methods. Fixed parallelization and
+  token usage for LLM and save and load states for both LLM and scraping. Audited
+  `module_3` and the PostgreSQL loading functionality for completeness based off of
   assignment rubrics/directions. Created most of this README.txt.

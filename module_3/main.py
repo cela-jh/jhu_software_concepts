@@ -1,7 +1,8 @@
 """
 `main.py`
-Entry point for scraping GradCafe admissions results or loading a results
-file into the PostgreSQL applicants table.
+Entry point for scraping GradCafe admissions results, loading a results
+file into the PostgreSQL applicants table, or running the Part 2 SQL
+analysis queries against it.
 """
 import argparse
 import functools
@@ -19,6 +20,7 @@ from scrape import (
 from clean import clean_data
 from data import save_data, validate_filepath, save_state, load_state, load_existing_urls
 from load_data import load_data
+from query_data import analyze, QUESTION_QUERY
 
 RESTART_EVERY_N_PAGES = 500
 
@@ -44,8 +46,9 @@ def parse_args():
     file into PostgreSQL.
     """
     parser = argparse.ArgumentParser(
-        description="Scrape GradCafe admissions results, or load a results "
-        "file into the PostgreSQL applicants table."
+        description="Scrape GradCafe admissions results, load a results "
+        "file into the PostgreSQL applicants table, or run the Part 2 SQL "
+        "analysis queries against it."
     )
     group = parser.add_mutually_exclusive_group(required=True)
     group.add_argument(
@@ -56,6 +59,10 @@ def parse_args():
         "--load", action="store_true",
         help="Load a results file into the PostgreSQL applicants table."
     )
+    group.add_argument(
+        "--query", action="store_true",
+        help="Run the Part 2 SQL analysis queries against the applicants table."
+    )
     parser.add_argument(
         "--num_results", type=int,
         help="Number of results to collect. Required with --scrape."
@@ -63,6 +70,14 @@ def parse_args():
     parser.add_argument(
         "--chrome_binary", type=Path,
         help="Absolute path to the system Chrome binary. Required with --scrape."
+    )
+    parser.add_argument(
+        "--db_user", type=str,
+        help="Database username. Required with --query."
+    )
+    parser.add_argument(
+        "--db_password", type=str,
+        help="Database password. Required with --query."
     )
     parser.add_argument(
         "relative_filepath", type=Path, nargs="?", default=Path("applicant_data.json"),
@@ -87,7 +102,21 @@ def _run_load(args):
         print("Set the PGUSER and PGPASSWORD environment variables before using --load.")
         return
 
-    load_data(args.relative_filepath, user, password)
+    load_data(args.relative_filepath, (user, password))
+
+
+def _run_query(args):
+    """
+    Runs the Part 2 SQL analysis queries against the applicants table,
+    using credentials supplied directly on the command line.
+    Returns none.
+    """
+    if not args.db_user or not args.db_password:
+        print("Pass --db_user and --db_password before using --query.")
+        return
+
+    credentials = (args.db_user, args.db_password)
+    analyze(QUESTION_QUERY, credentials)
 
 
 def _run_scrape(args):
@@ -210,11 +239,13 @@ def _run_scrape(args):
 
 def main(args):
     """
-    Dispatches to scraping or loading based on which flag was given.
+    Dispatches to scraping, loading, or querying based on which flag was given.
     Returns none.
     """
     if args.load:
         _run_load(args)
+    elif args.query:
+        _run_query(args)
     else:
         _run_scrape(args)
 

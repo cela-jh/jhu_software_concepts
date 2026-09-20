@@ -1,8 +1,8 @@
 Cameron Ela, cela1@jh.edu
-Module Info: Module 3 - Database Queries Assignmemt, Due: 20 September 2026
-NOTE: Module 3 is built on top of module 2. Information about module 2
-      functionalities is included so `main` is a complete app with scraping and
-      database actions.
+Module 3, Database Queries Assignment
+
+NOTE: The database tooling here builds on the module_2 scraper, so `main.py`
+      is a single, complete app covering both scraping and database actions.
 
 ================================================================================
 TABLE OF CONTENTS
@@ -13,17 +13,18 @@ TABLE OF CONTENTS
 4. Cloudflare Workaround
 5. Function Reference
 6. Loading Into PostgreSQL
-7. Local LLM Standardization
-8. Robots.txt Compliance
-9. Known Bugs / Limitations
-10. Citations
+7. SQL vs. SQLAlchemy
+8. Local LLM Standardization
+9. Robots.txt Compliance
+10. Known Bugs / Limitations
+11. Citations
 
 
 ================================================================================
 1. OVERVIEW
 ================================================================================
-This module has three functions, all driven from one CLI entry point
-(main.py --scrape, main.py --load, or main.py --query):
+Three commands share one CLI entry point:
+main.py --scrape, main.py --load, or main.py --query.
   1. Scrape publicly posted graduate admissions results from GradCafe
      (thegradcafe.com/survey) into a JSON file (applicant_data.json).
   2. Load a results file (applicant_data.json, or the LLM-standardized
@@ -32,24 +33,39 @@ This module has three functions, all driven from one CLI entry point
   3. Run the Part 2 SQL analysis queries against the applicants table
      and print each question's answer to the console.
 
-Files:
-  - scrape.py        : browser automation and HTML/table extraction
-  - clean.py          : converts raw rows into structured dictionaries
-  - data.py           : JSON persistence, resumable-crawl state, CLI validation
-  - db_helpers.py     : reusable PostgreSQL connect/disconnect helpers, plus
-    a standalone SQL pretty-printer (see section 5)
-  - load_data.py      : validates and loads a results file into PostgreSQL
-  - query_data.py     : the Part 2 questions, their SQL queries, a
-    formatter for each answer, and the function that runs them and prints
-    each answer to the console
-  - main.py           : CLI entry point dispatching to scraping, loading, or
-    querying
-  - llm_hosting/       : provided local-LLM standardizer, extended with
-    parallelization (see section 7)
-  - query_results.pdf : Part 2 write-up, one section per question giving
-    its question text, final result, SQL query, and a short explanation
-    of what the query does and why it answers the question (written by
-    hand, independent of query_data.py's console output)
+File tree (this README's own directory also holds venv/, requirements.txt,
+and applicant_data*.json, not listed below):
+
+  module_3/
+  |-- main.py           : CLI entry point dispatching to scraping, loading,
+  |                        or querying
+  |-- load_data.py       : validates and loads a results file into PostgreSQL
+  |-- db_helpers.py      : reusable PostgreSQL connect/disconnect helpers,
+  |                        plus a standalone SQL pretty-printer (see section 5)
+  |-- query_data.py      : the Part 2 questions, their SQL queries, a
+  |                        formatter for each answer, and the function that
+  |                        runs them and prints each answer to the console
+  |-- query_results.pdf  : Part 2 write-up, one section per question giving
+  |                        its question text, final result, SQL query, and a
+  |                        short explanation of what the query does and why
+  |                        it answers the question (written by hand,
+  |                        independent of query_data.py's console output)
+  |-- models.py          : SQLAlchemy Applicant model mapped to the same
+  |                        applicants table, plus the engine/session used to
+  |                        connect to it
+  |-- orm_queries.py     : repeats a subset of the Part 2 analysis using the
+  |                        SQLAlchemy ORM instead of handwritten SQL
+  `-- module_2_files/    : everything reused as-is from module_2's scraper
+      |-- scrape.py       : browser automation and HTML/table extraction
+      |-- clean.py        : converts raw rows into structured dictionaries
+      |-- data.py         : JSON persistence, resumable-crawl state, CLI
+      |                     validation
+      `-- llm_hosting/    : provided local-LLM standardizer, extended with
+                            parallelization (see section 8)
+
+main.py adds module_2_files/ to its import path at startup, so it can still
+import scrape.py, clean.py, and data.py directly by name; none of those
+three files were changed to make this work.
 
 
 ================================================================================
@@ -165,25 +181,24 @@ Steps to run the Part 2 SQL analysis:
 4. CLOUDFLARE WORKAROUND
 ================================================================================
 A plain urllib scrape returns HTTP 403 (Cloudflare blocks non-browser
-clients). A normal Selenium-launched Chrome fares no better - Selenium's
-own browser-launch carries automation fingerprints that put it in a
-repeating "verify you are human" loop. The fix: launch a real Chrome
-process independently via `subprocess` (not through Selenium) with remote
-debugging enabled and a persistent profile, then attach Selenium to that
-already-running browser over the DevTools Protocol. Because Selenium never
-launches the browser itself, it never carries the fingerprint that
-triggers the loop. If Cloudflare's challenge still appears, the script
-pauses and a human solves it once in the visible window; the cleared
-session then persists in that Chrome profile across the rest of the run
-and future runs.
+clients), and a normal Selenium-launched Chrome fares no better, since
+Selenium's own browser-launch carries automation fingerprints that
+trigger a repeating "verify you are human" loop. The fix: launch a real
+Chrome process independently via `subprocess` (not through Selenium)
+with remote debugging enabled and a persistent profile, then attach
+Selenium to that browser over the DevTools Protocol. Because Selenium
+never launches the browser itself, it never carries the fingerprint that
+triggers the loop. If Cloudflare's challenge still appears, a human
+solves it once in the visible window; the cleared session then persists
+in that Chrome profile across the rest of the run and future runs.
 
 
 ================================================================================
 5. FUNCTION REFERENCE
 ================================================================================
-Every function listed here is public (no leading underscore). Each
-description also covers what its supporting internal steps do, without
-naming them individually.
+Every function listed here is public (no leading underscore); each
+description also covers its supporting internal steps without naming
+them individually.
 
 scrape.py
 ------------
@@ -194,7 +209,7 @@ scrape.py
     killing it if it doesn't respond within a timeout.
   - cleanup_profile(profile_dir) -- Deletes a Chrome profile directory
     once it is no longer needed.
-  - chrome_helper(url, host_port, chrome_bin, profile_dir) -- REQUIRED.
+  - chrome_helper(url, host_port, chrome_bin, profile_dir).
     Launches Chrome as an independent process (so it never carries
     Selenium's automation fingerprint), waits for its remote-debugging
     endpoint to come up, and attaches a Selenium driver to it. Navigates
@@ -203,7 +218,7 @@ scrape.py
     challenge page is actually shown.
   - check_robots_allowed(url) -- Fetches and parses the site's robots.txt
     and reports whether scraping the given URL is currently permitted.
-  - scrape_data(driver, url=None) -- REQUIRED. Loads the given page (or
+  - scrape_data(driver, url=None). Loads the given page (or
     whatever page is already open, if no URL is given), confirming a
     results table is actually present and retrying with growing delays on
     a failed or unexpected page rather than reading bad data, then reads
@@ -214,7 +229,7 @@ scrape.py
 
 clean.py
 -----------
-  - clean_data(results, url) -- REQUIRED. The only public function in
+  - clean_data(results, url). The only public function in
     this file. Pairs each entry's main data row with whatever trailing
     tag or comment rows belong to it, pulls school, program, degree,
     date, status, and the entry's own URL out of the main row, and pulls
@@ -225,7 +240,7 @@ clean.py
 
 data.py
 ----------
-  - save_data(parsed_results, filepath) -- REQUIRED. Appends a page's new
+  - save_data(parsed_results, filepath). Appends a page's new
     results directly onto the end of the existing JSON array on disk
     (by trimming and rewriting just its closing bracket) rather than
     reading and rewriting everything collected so far, which matters once
@@ -242,7 +257,7 @@ data.py
 
 db_helpers.py
 ----------------
-  - connect_db(conn_params, credentials) -- REQUIRED. Opens and returns a
+  - connect_db(conn_params, credentials). Opens and returns a
     PostgreSQL connection using a (user, password) credentials tuple,
     printing a clear message naming every connection parameter (database
     name, host, port, username, password) and returning None instead of
@@ -259,7 +274,7 @@ db_helpers.py
 
 load_data.py
 ---------------
-  - load_data(filepath, credentials) -- REQUIRED. Takes a (user,
+  - load_data(filepath, credentials). Takes a (user,
     password) credentials tuple, reads the given JSON file, and connects
     to the database. For every result, it checks that
     program, date added, url, status, term, nationality, and degree are
@@ -286,7 +301,7 @@ tuples for the Part 2 SQL analysis, where each query is the complete,
 executable SQL for that question and each format_result is a small
 function turning that question's raw rows into its printed answer line
 (for example "Applicant count: 32544").
-  - analyze(question_query, credentials) -- REQUIRED. Takes QUESTION_QUERY
+  - analyze(question_query, credentials). Takes QUESTION_QUERY
     (or any list shaped like it) and a (user, password) credentials
     tuple, connects to the database, runs each query, and prints its
     answer using format_result. Each query runs inside its own savepoint,
@@ -294,6 +309,29 @@ function turning that question's raw rows into its printed answer line
     printed in place of an answer without aborting the connection or
     preventing the remaining questions from still being run. The
     connection is always closed before the function returns.
+
+models.py
+------------
+  - Applicant. A SQLAlchemy model mapping the same applicants
+    table load_data.py writes to, with one attribute per column and
+    p_id as the primary key. No separate table or copy of the data is
+    created; this maps directly onto the existing table.
+  - get_engine(credentials) -- Builds a SQLAlchemy engine for the same
+    database and credentials convention (a (user, password) tuple) used
+    everywhere else in this module.
+  - get_session(credentials). Opens a SQLAlchemy Session
+    bound to that engine. The caller is responsible for closing it.
+
+orm_queries.py
+-----------------
+  - orm_q1, orm_q4, orm_q5, orm_q8, orm_q9, orm_a1 -- Each repeats the
+    matching Part 2 question (Q1, Q4, Q5, Q8, Q9, and original question
+    A1) using SQLAlchemy's select()/where()/func()/and_()/or_() instead
+    of handwritten SQL, and returns the same formatted answer line as
+    its query_data.py counterpart.
+  - run_orm_queries(credentials). Opens a session, prints the
+    answer from each of the functions above, and closes the session
+    afterward.
 
 main.py
 ----------
@@ -305,7 +343,7 @@ main.py
     --scrape, --db_user and --db_password apply to --query, and a
     positional filepath is used as the output file when scraping or the
     input file when loading.
-  - main(args) -- REQUIRED. Dispatches based on which flag was given.
+  - main(args). Dispatches based on which flag was given.
     With --load, it confirms the input file exists, reads PostgreSQL
     credentials from the PGUSER and PGPASSWORD environment variables
     (printing a message and doing nothing further if either is unset),
@@ -360,10 +398,9 @@ than the application having to check first.
 
 Credentials
 --------------
-Per the assignment's requirement not to commit database passwords or
-other secrets, PostgreSQL credentials are never hardcoded and are always
-passed around as a (user, password) tuple rather than as separate
-arguments. For --load they are read at runtime from the PGUSER and
+To avoid ever committing a database password or other secret, PostgreSQL
+credentials are never hardcoded and are always passed around as a
+(user, password) tuple rather than as separate arguments. For --load they are read at runtime from the PGUSER and
 PGPASSWORD environment variables rather than a CLI flag, since a flag
 would be visible in shell history. --query instead takes --db_user and
 --db_password directly as CLI arguments, since that command is run
@@ -425,14 +462,72 @@ separate lookup query is needed to tell them apart.
 
 
 ================================================================================
-7. LOCAL LLM STANDARDIZATION
+7. SQL VS. SQLALCHEMY
+================================================================================
+query_data.py answers each question with handwritten SQL; orm_queries.py
+repeats a subset of the same questions using the SQLAlchemy ORM instead.
+Below is one question, A1 ("What percentage of total acceptances come
+from each term found in the data?"), answered both ways.
+
+Raw SQL (query_data.py):
+
+    WITH accepted AS (
+        SELECT term, COUNT(*) AS cnt
+        FROM applicants
+        WHERE status ILIKE 'Accepted%'
+        GROUP BY term
+    ),
+    total_accepted AS (
+        SELECT COUNT(*) AS cnt
+        FROM applicants
+        WHERE status ILIKE 'Accepted%'
+    )
+    SELECT accepted.term,
+            ROUND(accepted.cnt * 100.0 / total_accepted.cnt, 2) || '%' AS pct_of_acceptances
+    FROM accepted, total_accepted
+    ORDER BY split_part(accepted.term, ' ', 2)::int,
+            CASE WHEN accepted.term LIKE 'Spring%' THEN 0 ELSE 1 END
+
+SQLAlchemy (orm_queries.py):
+
+    accepted_filter = Applicant.status.ilike("Accepted%")
+
+    total_accepted = session.execute(
+        select(func.count()).select_from(Applicant).where(accepted_filter)
+    ).scalar_one()
+
+    rows = session.execute(
+        select(Applicant.term, func.count().label("cnt"))
+        .where(accepted_filter)
+        .group_by(Applicant.term)
+    ).all()
+
+Comparison: An advantage of the ORM version expresses accepted_filter 
+once and reuses it across both queries as an ordinary Python value, and 
+a typo in a column name fails immediately as an AttributeError rather than
+surfacing later as a SQL error string. This makes it easier to compose
+and safer to refactor than raw SQL. However, the raw SQL version computes both 
+counts and the final percentage in a single round trip to PostgreSQL via 
+two CTEs, giving exact control over the one query plan that runs. The ORM 
+version requires two separate queries and finishes the percentage math and 
+chronological ordering back in Python rather than using SQL, moving part of 
+the work out of the database. Raw SQL is also more portable since it can be 
+pasted directly into psql or a BI tool to verify by hand, while the ORM query 
+only exists as Python that needs the rest of this project to run. Neither
+approach is better in this case; each just has its strengths and weaknesses.
+The ORM version is easier to read and adapt in isolation, while the SQL version 
+is more compact and lets PostgreSQL do all the aggregation itself.
+
+
+================================================================================
+8. LOCAL LLM STANDARDIZATION
 ================================================================================
 Adds `llm-generated-program` / `llm-generated-university` to every row via
 a self-hosted TinyLlama model, leaving the original `program` field intact
 for traceability. From inside module_3, run:
 
-    cd llm_hosting && pip install -r requirements.txt
-    python app.py --file ../applicant_data.json --out ../llm_extend_applicant_data.json --parallel --n_workers 10 --n_threads 1
+    cd module_2_files/llm_hosting && pip install -r requirements.txt
+    python app.py --file ../../applicant_data.json --out ../../llm_extend_applicant_data.json --parallel --n_workers 10 --n_threads 1
 
     (--n_workers 10 is a tuned value for a 14-core machine, chosen after
     observing that going higher led to CPU oversubscription rather than a
@@ -441,7 +536,7 @@ for traceability. From inside module_3, run:
 
 While it's running, each worker's progress can be checked at any time by
 counting completed lines in its chunk output file, from inside
-llm_hosting/:
+module_2_files/llm_hosting/:
 
     wc -l chunk_*.jsonl
 
@@ -521,7 +616,7 @@ difference).
 
 
 ================================================================================
-8. ROBOTS.TXT COMPLIANCE
+9. ROBOTS.TXT COMPLIANCE
 ================================================================================
 GradCafe's robots.txt was reviewed manually before writing any scraping
 code and captured in screenshot.jpg (this folder), confirming `/survey` is
@@ -533,7 +628,7 @@ nothing is scraped. Only the public `/survey` results listing is accessed.
 
 
 ================================================================================
-9. KNOWN BUGS / LIMITATIONS
+10. KNOWN BUGS / LIMITATIONS
 ================================================================================
 - Explicit Selenium waits (WebDriverWait) are not used; page-readiness is
   inferred after the fact by checking for a results table in the loaded
@@ -543,10 +638,11 @@ nothing is scraped. Only the public `/survey` results listing is accessed.
 
 
 ================================================================================
-10. CITATIONS
+11. CITATIONS
 ================================================================================
 - CLAUDE: Used primarily as an advisor, guide, and error catcher. Considered edge
-  cases and helped developed error catching methods. Fixed parallelization and
-  token usage for LLM and save and load states for both LLM and scraping. Audited
-  `module_3` and the PostgreSQL loading functionality for completeness based off of
-  assignment rubrics/directions. Created most of this README.txt.
+  cases and helped develop error-catching methods. Fixed parallelization and
+  token usage for the LLM step, and save/load states for both the LLM and
+  scraping. Audited `module_3` and the PostgreSQL loading functionality for
+  completeness. Created most of this README.txt, other than assignment questions
+  which needed direct answering in the README.

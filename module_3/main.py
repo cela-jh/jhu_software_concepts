@@ -7,12 +7,18 @@ analysis queries against it.
 import argparse
 import functools
 import os
+import sys
 import time
 from pathlib import Path
 
 # Force every print() in this process to flush immediately for logging purposes.
 # Helps prevent making a script that is working look hung.
 print = functools.partial(print, flush=True)
+
+# scrape.py, clean.py, and data.py live in module_2_files/, reused as-is
+# from module_2, so it's added to the import path here rather than moving
+# main.py's own working directory.
+sys.path.insert(0, str(Path(__file__).resolve().parent / "module_2_files"))
 from scrape import (
     scrape_data, chrome_helper, terminate_process, cleanup_profile,
     create_profile_dir, check_robots_allowed

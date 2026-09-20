@@ -383,6 +383,21 @@ doesn't have them, since none of these are required by the table schema
 - this covers both llm_extend_applicant_data.json and the plain
 applicant_data.json, which has no llm_generated fields at all.
 
+gpa, gre, gre_v, and gre_aw are also range-checked (0-4.0, 130-170,
+130-170, and 0-6 respectively - gre specifically means the GRE
+Quantitative score, not a combined total) and set to NULL instead of
+being stored if the scraped number falls outside that range, since
+GradCafe's badges occasionally contain a mis-scaled or placeholder value
+(such as a GPA on a 10-point scale, or a GRE combined score where a
+Quantitative score was expected) rather than a real score for that
+field. us_or_international is normalized to 'Other' whenever the scraped
+value isn't exactly 'American' or 'International' (case-insensitively),
+since a small number of entries have this tag scraped from the wrong
+cell and would otherwise store a value that isn't a real classification
+at all. Both of these run against the whole table on every load, so
+values loaded before this validation existed are cleaned up as well as
+new ones.
+
 Upserting instead of skipping duplicates
 --------------------------------------------
 Loading a result whose url is already in the table updates that row

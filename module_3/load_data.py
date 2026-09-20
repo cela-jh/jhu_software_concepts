@@ -29,9 +29,11 @@ BATCH_SIZE = 1000
 SMALL_BATCH_SIZE = 10
 
 GPA_VALID_RANGE = (0, 4.0)
-GRE_VALID_RANGES = [(130, 170), (260, 340)]
+GRE_VALID_RANGES = [(130, 170)]
 GRE_V_VALID_RANGE = (130, 170)
 GRE_AW_VALID_RANGE = (0, 6)
+
+NATIONALITY_VALUES = {"american": "American", "international": "International"}
 
 
 class InvalidResult(Exception):
@@ -56,6 +58,16 @@ def _extract_number(text, valid_ranges=None):
     if valid_ranges is not None and not any(low <= value <= high for low, high in valid_ranges):
         return None
     return value
+
+
+def _normalize_nationality(value):
+    """
+    Maps a scraped US/International value to 'American' or 'International'
+    case-insensitively, or 'Other' for anything else (including values that
+    were scraped from the wrong tag and aren't a nationality at all).
+    Returns a string.
+    """
+    return NATIONALITY_VALUES.get(value.strip().lower(), "Other")
 
 
 def _parse_date_added(text):
@@ -109,7 +121,7 @@ def _build_row(result):
         "url": result["url"],
         "status": result["status"],
         "term": result["term"],
-        "us_or_international": result["US/International"],
+        "us_or_international": _normalize_nationality(result["US/International"]),
         "gpa": _extract_number(result.get("GPA"), [GPA_VALID_RANGE]),
         "gre": _extract_number(result.get("GRE score"), GRE_VALID_RANGES),
         "gre_v": _extract_number(result.get("GRE V score"), [GRE_V_VALID_RANGE]),
@@ -214,10 +226,10 @@ def _clear_invalid_scores(cursor):
         GPA_VALID_RANGE,
     )
     cleared_gpa = cursor.rowcount
+    gre_range_clause = " OR ".join(["gre BETWEEN %s AND %s"] * len(GRE_VALID_RANGES))
     cursor.execute(
-        "UPDATE applicants SET gre = NULL "
-        "WHERE gre IS NOT NULL "
-        "AND NOT (gre BETWEEN %s AND %s OR gre BETWEEN %s AND %s);",
+        f"UPDATE applicants SET gre = NULL "
+        f"WHERE gre IS NOT NULL AND NOT ({gre_range_clause});",
         [value for bounds in GRE_VALID_RANGES for value in bounds],
     )
     cleared_gre = cursor.rowcount
@@ -241,6 +253,25 @@ def _clear_invalid_scores(cursor):
               f"gre_aw: {cleared_gre_aw}).")
 
 
+def _normalize_existing_nationality(cursor):
+    """
+    Sets us_or_international to 'Other' for rows already in the table
+    whose value isn't 'American' or 'International', so a value scraped
+    from the wrong tag (such as a stray "0") doesn't get counted as a
+    usable nationality classification it isn't. Prints how many rows were
+    changed.
+    Returns none.
+    """
+    cursor.execute(
+        "UPDATE applicants SET us_or_international = 'Other' "
+        "WHERE us_or_international NOT IN ('American', 'International');"
+    )
+    changed = cursor.rowcount
+    if changed:
+        print(f"Set us_or_international to 'Other' for {changed} rows "
+              f"that weren't 'American' or 'International'.")
+
+
 def load_data(filepath, credentials: tuple[str, str]):
     """
     Loads applicant results from a JSON file into the applicants table.
@@ -250,7 +281,10 @@ def load_data(filepath, credentials: tuple[str, str]):
     earlier load (such as the llm_generated fields) fills them in on the
     existing row instead of being ignored. Implausible gpa/gre/gre_v/
     gre_aw values, whether from this file or already in the table from an
-    earlier load, are cleared to NULL rather than left to skew analysis.
+    earlier load, are cleared to NULL rather than left to skew analysis,
+    and any us_or_international value that isn't 'American' or
+    'International' is normalized to 'Other', in this file and in the
+    table already.
     Returns none.
     """
     try:
@@ -285,6 +319,7 @@ def load_data(filepath, credentials: tuple[str, str]):
                     inserted_urls |= batch_inserted
                     updated_urls |= batch_updated
                 _clear_invalid_scores(cursor)
+                _normalize_existing_nationality(cursor)
     finally:
         disconnect_db(conn)
 

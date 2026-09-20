@@ -45,7 +45,7 @@ def _format_q8(rows):
 def _format_q9(rows):
     r = rows[0]
     return (f"PhD Computer Science at listed schools (LLM): {r['cnt_fall26_cs_phd_llm']}, "
-            f"Difference: {r['llm_less_original']}")
+            f"Difference: {r['llm_less_original']:+d}")
 
 
 def _format_a1(rows):
@@ -132,7 +132,7 @@ QUESTION_QUERY = [
         SELECT
             ROUND(
                 SUM(
-                    CASE WHEN status LIKE 'Accepted%' THEN 1
+                    CASE WHEN status ILIKE 'Accepted%' THEN 1
                     ELSE 0
                     END
                 ) * 100.0 / COUNT(status),
@@ -150,7 +150,7 @@ QUESTION_QUERY = [
         FROM applicants
         WHERE term = 'Fall 2026'
             AND gpa IS NOT NULL
-            AND status LIKE 'Accepted%'
+            AND status ILIKE 'Accepted%'
         """,
         _format_q6
     ),
@@ -160,10 +160,10 @@ QUESTION_QUERY = [
         """
         SELECT COUNT(*) AS cnt_jhu_ms_cs
         FROM applicants
-        WHERE degree = 'Masters'
-            AND program LIKE 'Computer Science, %'
-            AND (program LIKE '%, Johns Hopkins University%'
-                OR program LIKE '%, JHU%')
+        WHERE degree ILIKE 'Masters'
+            AND program ILIKE 'Computer Science, %'
+            AND (program ILIKE '%, Johns Hopkins University%'
+                OR program ILIKE '%, JHU%')
         """,
         _format_q7
     ),
@@ -176,14 +176,14 @@ QUESTION_QUERY = [
         SELECT COUNT(*) AS cnt_fall26_cs_phd
         FROM applicants
         WHERE term = 'Fall 2026'
-            AND degree = 'PhD'
-            AND status LIKE 'Accepted%'
-            AND program LIKE 'Computer Science, %'
-            AND (program LIKE '%, Georgetown University'
-                OR program LIKE'%, Massachusetts Institute of Technology'
-                OR program LIKE '%, MIT'
-                OR program LIKE '%, Stanford University'
-                OR program LIKE '%, Carnegie Mellon University')
+            AND degree ILIKE 'PhD'
+            AND status ILIKE 'Accepted%'
+            AND program ILIKE 'Computer Science, %'
+            AND (program ILIKE '%, Georgetown University'
+                OR program ILIKE '%, Massachusetts Institute of Technology'
+                OR program ILIKE '%, MIT'
+                OR program ILIKE '%, Stanford University'
+                OR program ILIKE '%, Carnegie Mellon University')
         """,
         _format_q8
     ),
@@ -195,27 +195,27 @@ QUESTION_QUERY = [
         SELECT COUNT(*) AS cnt
         FROM applicants
         WHERE term = 'Fall 2026'
-            AND degree = 'PhD'
-            AND status LIKE 'Accepted%'
-            AND program LIKE 'Computer Science, %'
-            AND (program LIKE '%, Georgetown University'
-                OR program LIKE'%, Massachusetts Institute of Technology'
-                OR program LIKE '%, MIT'
-                OR program LIKE '%, Stanford University'
-                OR program LIKE '%, Carnegie Mellon University')
+            AND degree ILIKE 'PhD'
+            AND status ILIKE 'Accepted%'
+            AND program ILIKE 'Computer Science, %'
+            AND (program ILIKE '%, Georgetown University'
+                OR program ILIKE '%, Massachusetts Institute of Technology'
+                OR program ILIKE '%, MIT'
+                OR program ILIKE '%, Stanford University'
+                OR program ILIKE '%, Carnegie Mellon University')
         ),
         q9 AS (
         SELECT COUNT(*) AS cnt
         FROM applicants
         WHERE term = 'Fall 2026'
-            AND degree = 'PhD'
-            AND status LIKE 'Accepted%'
-            AND llm_generated_program = 'Computer Science'
-            AND (llm_generated_university LIKE 'Georgetown University'
-                OR llm_generated_university LIKE 'Massachusetts Institute of Technology'
-                OR llm_generated_university LIKE 'MIT'
-                OR llm_generated_university LIKE 'Stanford University'
-                OR llm_generated_university LIKE 'Carnegie Mellon University')
+            AND degree ILIKE 'PhD'
+            AND status ILIKE 'Accepted%'
+            AND llm_generated_program ILIKE 'Computer Science'
+            AND (llm_generated_university ILIKE 'Georgetown University'
+                OR llm_generated_university ILIKE 'Massachusetts Institute of Technology'
+                OR llm_generated_university ILIKE 'MIT'
+                OR llm_generated_university ILIKE 'Stanford University'
+                OR llm_generated_university ILIKE 'Carnegie Mellon University')
         )
         SELECT q8.cnt AS cnt_fall26_cs_phd_original,
                 q9.cnt AS cnt_fall26_cs_phd_llm,
@@ -230,13 +230,13 @@ QUESTION_QUERY = [
         WITH accepted AS (
             SELECT term, COUNT(*) AS cnt
             FROM applicants
-            WHERE status LIKE 'Accepted%'
+            WHERE status ILIKE 'Accepted%'
             GROUP BY term
         ),
         total_accepted AS (
             SELECT COUNT(*) AS cnt
             FROM applicants
-            WHERE status LIKE 'Accepted%'
+            WHERE status ILIKE 'Accepted%'
         )
         SELECT accepted.term,
                 ROUND(accepted.cnt * 100.0 / total_accepted.cnt, 2) || '%' AS pct_of_acceptances
@@ -255,18 +255,18 @@ QUESTION_QUERY = [
             SELECT gpa, status
             FROM applicants
             WHERE gpa IS NOT NULL
-                AND (program LIKE '%, University of Southern California'
-                    OR program LIKE '%, USC')
+                AND (program ILIKE '%, University of Southern California'
+                    OR program ILIKE '%, USC')
         ),
         accepted_avg AS (
             SELECT ROUND(AVG(gpa)::numeric, 2) AS avg_gpa
             FROM usc
-            WHERE status LIKE 'Accepted%'
+            WHERE status ILIKE 'Accepted%'
         ),
         not_accepted_avg AS (
             SELECT ROUND(AVG(gpa)::numeric, 2) AS avg_gpa
             FROM usc
-            WHERE status NOT LIKE 'Accepted%'
+            WHERE status NOT ILIKE 'Accepted%'
         )
         SELECT accepted_avg.avg_gpa AS avg_gpa_accepted_usc,
                 not_accepted_avg.avg_gpa AS avg_gpa_not_accepted_usc,

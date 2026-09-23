@@ -1,8 +1,8 @@
-# Module 3: Database Queries Assignment
+# Module 4: Testing and Documentation
 
 Cameron Ela, cela1@jh.edu
 
-> Builds on the module_2 scraper. There is no single combined entry point; scraping, loading, querying, and the webpage each run directly from their own file (see [CLI Usage](#3-cli-usage)).
+> Builds on the module_2 scraper and module_3's database/webapp work, reorganized into a proper `src/GradCafeAnalytics` package. There is no single combined entry point; scraping, loading, querying, and the webpage each run directly from their own file (see [CLI Usage](#3-cli-usage)).
 
 ## Table of Contents
 
@@ -20,45 +20,55 @@ Cameron Ela, cela1@jh.edu
 
 ## 1. Overview
 
-Four files, each independently executable, cover this module's work:
+Four files, each independently executable, cover this project's work:
 
-1. `module_2_files/scrape.py` - Scrapes publicly posted graduate admissions results from GradCafe (thegradcafe.com/survey) into a JSON file (`applicant_data.json`).
-2. `load_data.py` - Loads a results file (`applicant_data.json`, or the LLM-standardized `llm_extend_applicant_data.json`) into a PostgreSQL table called `applicants`.
-3. `query_data.py` - Runs the Part 2 SQL analysis queries against the `applicants` table and prints each answer to the console.
-4. `app.py` - A Flask app displaying every analysis answer on one webpage, read live through the SQLAlchemy `Applicant` model rather than `query_data.py`'s raw-SQL path. Its Pull Data button runs `scrape.py` in the background to fetch newly submitted entries and load them into PostgreSQL; Update Analysis re-renders the page with current results without starting a scrape.
+1. `src/GradCafeAnalytics/scraping/scrape.py` - Scrapes publicly posted graduate admissions results from GradCafe (thegradcafe.com/survey) into a JSON file (`data/applicant_data.json`).
+2. `src/GradCafeAnalytics/database/load_data.py` - Loads a results file (`applicant_data.json`, or the LLM-standardized `llm_extend_applicant_data.json`) into a PostgreSQL table called `applicants`.
+3. `src/GradCafeAnalytics/database/query_data.py` - Runs the Part 2 SQL analysis queries against the `applicants` table and prints each answer to the console.
+4. `src/GradCafeAnalytics/app.py` - A Flask app displaying every analysis answer on one webpage, read live through the SQLAlchemy `Applicant` model rather than `query_data.py`'s raw-SQL path. Its Pull Data button runs `scrape.py` in the background to fetch newly submitted entries and load them into PostgreSQL; Update Analysis re-renders the page with current results without starting a scrape.
 
 ### File tree
 
-This directory also holds `venv/`, `requirements.txt`, and `applicant_data*.json`, not listed below.
-
 ```
-module_3/
-|-- load_data.py       : validates and loads a results file into PostgreSQL
-|-- db_helpers.py      : PostgreSQL connect/disconnect helpers, SQL pretty-printer
-|-- query_data.py      : Part 2 questions, SQL, formatters, and the runner
-|-- query_results.pdf  : Part 2 write-up (question, result, SQL, explanation)
-|-- models.py          : SQLAlchemy Applicant model, engine/session
-|-- orm_queries.py     : Part 2 analysis expressed with the SQLAlchemy ORM
-|-- app.py             : starts the Flask server
-|-- app/               : the Flask presentation layer
-|   |-- __init__.py     : builds the Flask app and registers its routes
-|   |-- routes.py       : the analysis page route, read live through the ORM
-|   |-- pull_control.py : tracks/controls the background Pull Data subprocess
-|   |-- templates/analysis.html : the page template
-|   `-- static/css/style.css    : the page's styling
-`-- module_2_files/    : reused as-is from module_2's scraper
-    |-- scrape.py       : browser automation, extraction, scraping CLI
-    |-- clean.py        : converts raw rows into structured dictionaries
-    |-- data.py         : JSON persistence, resumable-crawl state
-    `-- llm_hosting/    : provided local-LLM standardizer, extended (section 8)
+module_4/
+|-- requirements.txt
+|-- venv/                  : project virtual environment
+|-- data/
+|   |-- applicant_data.json
+|   |-- llm_extend_applicant_data.json
+|   `-- .state/
+|       `-- applicant_data.state.json : resumable-crawl sidecar (section 5)
+|-- docs/
+|   |-- query_results.pdf   : Part 2 write-up (question, result, SQL, explanation)
+|   `-- limitations.pdf, screenshots
+`-- src/GradCafeAnalytics/
+    |-- paths.py           : shared DATA_DIR/STATE_DIR/SCRAPE_SCRIPT locations, resolved from this file
+    |-- app.py             : starts the Flask server
+    |-- app/               : the Flask presentation layer
+    |   |-- __init__.py     : builds the Flask app and registers its routes
+    |   |-- routes.py       : the analysis page route, read live through the ORM
+    |   |-- pull_control.py : tracks/controls the background Pull Data subprocess
+    |   |-- templates/analysis.html : the page template
+    |   `-- static/css/style.css    : the page's styling
+    |-- database/          : everything that talks to the `applicants` table
+    |   |-- db_helpers.py   : PostgreSQL connect/disconnect helpers, SQL pretty-printer
+    |   |-- models.py       : SQLAlchemy Applicant model, engine/session
+    |   |-- load_data.py    : validates and loads a results file into PostgreSQL
+    |   |-- query_data.py   : Part 2 questions, SQL, formatters, and the runner
+    |   `-- orm_queries.py  : Part 2 analysis expressed with the SQLAlchemy ORM
+    |-- scraping/          : browser automation and JSON persistence
+    |   |-- scrape.py       : browser automation, extraction, scraping CLI
+    |   |-- clean.py        : converts raw rows into structured dictionaries
+    |   `-- storage.py      : JSON persistence, resumable-crawl state
+    `-- llm_hosting/       : provided local-LLM standardizer, extended (section 8), kept as its own installable tool
 ```
 
-`scrape.py` imports `clean.py` and `data.py` by name; Python adds a script's own directory to its import path when run directly, and all three live in `module_2_files/`. `load_data.py` adds `module_2_files/` to its import path at startup to reuse `data.py`'s `validate_filepath`.
+`scrape.py` imports `clean.py` and `storage.py` by name; Python adds a script's own directory to its import path when run directly, and all three live in `scraping/`. Any file that needs a sibling module in another package (`load_data.py` reusing `storage.py`'s `validate_filepath`, `pull_control.py` reusing `load_data.py`, `routes.py` reusing `database`'s modules, or anything needing `paths.py`) inserts `GradCafeAnalytics/` onto its import path at startup, the same technique module_3 used for `module_2_files/`, just repointed at the new layout. `paths.py` centralizes `data/`, `data/.state/`, and `scrape.py`'s own location as constants so no file hardcodes a path to another directory more than once.
 
 ## 2. Setup
 
 1. Requires Python 3.10+, Google Chrome installed locally, and a running PostgreSQL server with a database (this project uses `cam_db`) and an `applicants` table already created (schema in [section 6](#6-loading-into-postgresql)).
-2. From `module_3`, create and activate a virtual environment:
+2. From `module_4`, create and activate a virtual environment:
    ```
    python3 -m venv venv
    source venv/bin/activate        # Windows: venv\Scripts\activate
@@ -77,27 +87,27 @@ module_3/
 
 ## 3. CLI Usage
 
-Each command below is run on its own; none depend on a shared entry point.
+Each command below is run on its own from `module_4`; none depend on a shared entry point. Every script resolves `data/` from its own file location via `paths.py`, so these all work the same regardless of current directory.
 
-**Scraping** (from `module_3`):
+**Scraping:**
 ```
-python module_2_files/scrape.py --num_results <N> --chrome_binary "<path to Chrome>" [output.json]
+python src/GradCafeAnalytics/scraping/scrape.py --num_results <N> --chrome_binary "<path to Chrome>" [output.json]
 ```
-`--num_results` is the cumulative target for the whole crawl, including a resumed run's prior results, not "collect N more." A real Chrome window opens and navigates to GradCafe; if Cloudflare's challenge appears, solve it manually once (the script polls for it to clear rather than waiting on a keypress, so this also works with no terminal attached, as during a Pull Data run). Transient page failures (including Cloudflare 522s) are retried with exponential backoff instead of stopping the run. If interrupted, re-running the same command with the same output file resumes from saved state.
+`--num_results` is the cumulative target for the whole crawl, including a resumed run's prior results, not "collect N more." A real Chrome window opens and navigates to GradCafe; if Cloudflare's challenge appears, solve it manually once (the script polls for it to clear rather than waiting on a keypress, so this also works with no terminal attached, as during a Pull Data run). Transient page failures (including Cloudflare 522s) are retried with exponential backoff instead of stopping the run. If interrupted, re-running the same command with the same output file resumes from saved state (`data/.state/`).
 
 **Loading into PostgreSQL:**
 ```
-PGUSER=youruser PGPASSWORD=yourpassword python load_data.py <file.json>
+PGUSER=youruser PGPASSWORD=yourpassword python src/GradCafeAnalytics/database/load_data.py <file.json>
 ```
 Validates every result, skips and reports any missing required fields, and upserts the rest (see [section 6](#6-loading-into-postgresql) for details). Prints a summary of loaded/updated/skipped counts at the end.
 
-**Running the Part 2 SQL analysis:** `PGUSER=youruser PGPASSWORD=yourpassword python query_data.py`
+**Running the Part 2 SQL analysis:** `PGUSER=youruser PGPASSWORD=yourpassword python src/GradCafeAnalytics/database/query_data.py`
 
-**Running the Part 6 SQLAlchemy ORM analysis:** `PGUSER=youruser PGPASSWORD=yourpassword python orm_queries.py`
+**Running the Part 6 SQLAlchemy ORM analysis:** `PGUSER=youruser PGPASSWORD=yourpassword python src/GradCafeAnalytics/database/orm_queries.py`
 
 **Running the analysis webpage:**
 ```
-PGUSER=youruser PGPASSWORD=yourpassword CHROME_BINARY="<path to Chrome>" python app.py
+PGUSER=youruser PGPASSWORD=yourpassword CHROME_BINARY="<path to Chrome>" python src/GradCafeAnalytics/app.py
 ```
 Open http://127.0.0.1:5000/. Every answer is read live from PostgreSQL through the `Applicant` model on each page load. `CHROME_BINARY` is only needed for Pull Data.
 
@@ -118,44 +128,48 @@ A plain urllib scrape returns HTTP 403, and a normal Selenium-launched Chrome fa
 
 Every function listed is public (no leading underscore).
 
-### `scrape.py`
+### `paths.py`
+- `DATA_DIR`, `STATE_DIR`, `SCRAPE_SCRIPT`, `DEFAULT_DATA_FILE`, `DEFAULT_LLM_DATA_FILE` - Constants resolved from this file's own location, so they hold regardless of the current working directory.
+- `state_path_for(data_filepath)` - Returns the sidecar state-file path in `STATE_DIR` matching a data file's basename, creating `STATE_DIR` if needed.
+
+### `scraping/scrape.py`
 - `create_profile_dir()` / `cleanup_profile()` - Create/delete the persistent Chrome profile directory that lets a cleared Cloudflare session survive restarts.
 - `terminate_process(process)` - Terminates a Chrome process, force-killing it if unresponsive.
 - `chrome_helper(url, host_port, chrome_bin, profile_dir)` - Launches Chrome independently, attaches Selenium with an "eager" page load strategy (so a hanging tracker resource can't stall navigation), and blocks known ad/tracker domains via Chrome DevTools Protocol before navigating, since GradCafe's ad auction re-runs from scratch on every fresh, cookie-less profile and can otherwise stall loads for minutes. Retries on failed loads, and polls the page title for a Cloudflare challenge to clear (raising `TimeoutError` after `CLOUDFLARE_WAIT_TIMEOUT` seconds) instead of waiting on keyboard input.
 - `check_robots_allowed(url)` - Reports whether scraping the given URL is currently permitted by robots.txt.
 - `scrape_data(driver, url=None)` - Loads a page, confirms a results table is present (retrying otherwise), reads every row, clicks "Next" via JavaScript, and returns the rows plus the next-page URL (or `None`).
 - `format_duration(seconds)` - Formats a duration as "Xh Ym Zs" for progress messages.
-- `parse_args()` - `--chrome_binary` required; `--num_results` and `--pull_seen_limit` optional; positional output filepath (default `applicant_data.json`).
-- `run_scrape(args)` - Validates the Chrome path and robots.txt, then scrapes until stopped. With `--num_results`, resumes from saved pagination state and never re-adds known urls, stopping at that target or when pages run out. Without it ("pull mode", used by Pull Data), always starts at page 1 and ignores saved state, stopping once `--pull_seen_limit` consecutive results are already known. Restarts the browser periodically to clear session state, shuts it down cleanly on exit or error, and in pull mode also stops cleanly on SIGTERM (the Cancel button) without losing saved progress.
+- `parse_args()` - `--chrome_binary` required; `--num_results` and `--pull_seen_limit` optional; positional output filepath (default `paths.DEFAULT_DATA_FILE`, i.e. `data/applicant_data.json`).
+- `run_scrape(args)` - Validates the Chrome path and robots.txt, then scrapes until stopped. With `--num_results`, resumes from saved pagination state (via `paths.state_path_for()`) and never re-adds known urls, stopping at that target or when pages run out. Without it ("pull mode", used by Pull Data), always starts at page 1 and ignores saved state, stopping once `--pull_seen_limit` consecutive results are already known. Restarts the browser periodically to clear session state, shuts it down cleanly on exit or error, and in pull mode also stops cleanly on SIGTERM (the Cancel button) without losing saved progress.
 
-### `clean.py`
+### `scraping/clean.py`
 - `clean_data(results, url)` - Pairs each entry's main row with its trailing tag/comment rows, extracts school, program, degree, date, status, and URL from the main row, and term, nationality, GRE/GPA scores, and comments from the trailing rows via pattern matching. Returns one dictionary per entry with whichever fields it had.
 
-### `data.py`
+### `scraping/storage.py`
 - `save_data(parsed_results, filepath)` - Appends new results directly onto the existing JSON array on disk instead of rewriting the whole file.
 - `load_existing_urls(filepath)` - Reads which urls are already saved, so a scrape can skip duplicates.
 - `validate_filepath(filepath, must_exist)` - Confirms a path is a `.json` file, raising a clear error otherwise.
 - `save_state(state, filepath)` / `load_state(filepath)` - Persist and read the pagination sidecar file so an interrupted scrape resumes instead of restarting.
 
-### `db_helpers.py`
+### `database/db_helpers.py`
 - `connect_db(conn_params, credentials)` - Opens a PostgreSQL connection, printing a clear message and returning `None` instead of raising if it fails.
 - `disconnect_db(conn)` - Closes a connection opened by `connect_db`.
 - `pretty_print_query(query)` - Reformats a SQL string so each clause starts its own line in uppercase. Standalone utility; not currently called by `query_data.py`.
 
-### `load_data.py`
+### `database/load_data.py`
 - `load_data(filepath, credentials)` - Reads a JSON file and loads it into PostgreSQL: skips and collects ids for results missing a required field, converts/validates dates and GPA/GRE values, upserts valid results in batches, and prints a load/update/skip summary. See [section 6](#6-loading-into-postgresql) for the full logic.
-- `parse_args()` - Optional positional filepath (default `applicant_data.json`). Reads `PGUSER`/`PGPASSWORD` from the environment when run directly, exiting with a message if either is unset.
+- `parse_args()` - Optional positional filepath (default `paths.DEFAULT_DATA_FILE`). Reads `PGUSER`/`PGPASSWORD` from the environment when run directly, exiting with a message if either is unset.
 
-### `query_data.py`
+### `database/query_data.py`
 Holds `QUESTION_QUERY`, the list of (question, SQL, format_result) tuples for the Part 2 analysis.
 - `analyze(question_query, credentials)` - Runs each query and prints its formatted answer; a failing query prints its error in place without stopping the rest.
 - `_pg_credentials()` - Reads `PGUSER`/`PGPASSWORD` from the environment, raising `EnvironmentError` if either is unset.
 
-### `models.py`
+### `database/models.py`
 - `Applicant` - SQLAlchemy model mapping the same `applicants` table `load_data.py` writes to (`p_id` as primary key). No separate table or copy of data is created.
 - `get_engine(credentials)` / `get_session(credentials)` - Build a SQLAlchemy engine/session using the same (user, password) credentials convention used elsewhere.
 
-### `orm_queries.py`
+### `database/orm_queries.py`
 - `orm_q1` through `orm_q9`, `orm_a1`, `orm_a2` - Repeat the matching Part 2 question with SQLAlchemy's `select()`/`where()`/`func()`/`and_()`/`or_()`, returning the same formatted answer as `query_data.py`. `ALL_ORM_ANSWERS` lists all eleven for `app.py`; `ORM_QUESTIONS` lists Q1, Q4, Q5, Q8, Q9, and A1 for `run_orm_queries()`.
 - `run_orm_queries(credentials)` / `_pg_credentials()` - Same pattern as `query_data.py`.
 
@@ -263,11 +277,11 @@ rows = session.execute(
 
 ## 8. Local LLM Standardization
 
-Adds `llm-generated-program` / `llm-generated-university` to every row via a self-hosted TinyLlama model, leaving the original `program` field intact. From inside `module_3`:
+Adds `llm-generated-program` / `llm-generated-university` to every row via a self-hosted TinyLlama model, leaving the original `program` field intact. From `module_4`:
 
 ```
-cd module_2_files/llm_hosting && pip install -r requirements.txt
-python app.py --file ../../applicant_data.json --out ../../llm_extend_applicant_data.json --parallel --n_workers 10 --n_threads 1
+cd src/GradCafeAnalytics/llm_hosting && pip install -r requirements.txt
+python app.py --file ../../../data/applicant_data.json --out ../../../data/llm_extend_applicant_data.json --parallel --n_workers 10 --n_threads 1
 ```
 
 `--n_workers 10` is tuned for a 14-core machine (higher caused CPU oversubscription, see below); lower it on a machine with fewer cores. Progress can be checked while running via `wc -l chunk_*.jsonl` inside `llm_hosting/`.
@@ -291,9 +305,9 @@ GradCafe's robots.txt was reviewed manually before writing any scraping code and
 ## 10. Known Bugs / Limitations
 
 - Explicit Selenium waits (`WebDriverWait`) aren't used; page-readiness is inferred from a results-table check plus a jittered delay, a deliberate tradeoff that means a page could in principle be read slightly before fully rendering.
-- `data.py`'s `save_data()` assumes the file it's appending to ends in exactly the bytes it last wrote; a file edited by hand or another tool afterward could break that assumption.
+- `storage.py`'s `save_data()` assumes the file it's appending to ends in exactly the bytes it last wrote; a file edited by hand or another tool afterward could break that assumption.
 - If `app.py` is restarted mid-pull, `pull_control`'s in-memory state is lost and the page shows Pull Data as idle even though the old Chrome process may still be running. Restart cleans up that orphaned Chrome process first, so only the tracking of that run is lost.
 
 ## 11. Citations
 
-- **CLAUDE**: Used primarily as an advisor, guide, and error catcher. Considered edge cases and helped develop error-catching methods. Fixed parallelization and token usage for the LLM step, and save/load states for both the LLM and scraping. Audited `module_3` and the PostgreSQL loading functionality for completeness. Created most of this README, other than assignment questions which needed direct answering in the README.
+- **CLAUDE**: Used primarily as an advisor, guide, and error catcher. Considered edge cases and helped develop error-catching methods. Played major role in refactoring code into organized directories, repairing broken filepaths and imports and ensuring they wouldn't break with future refactoring. Created most of this README.

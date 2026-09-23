@@ -1,5 +1,5 @@
 """
-`data.py`
+`storage.py`
 Includes functions to save to and load data from JSON.
 """
 import json

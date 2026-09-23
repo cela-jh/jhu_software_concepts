@@ -12,6 +12,10 @@ import sys
 from datetime import datetime
 from pathlib import Path
 import psycopg
+
+# Ensures db_helpers resolves whether load_data.py is run directly or
+# imported as database.load_data from elsewhere in the package.
+sys.path.insert(0, str(Path(__file__).resolve().parent))
 from db_helpers import connect_db, disconnect_db, CONN_PARAMS
 
 
@@ -349,16 +353,18 @@ def parse_args():
         description="Load a results file into the PostgreSQL applicants table."
     )
     parser.add_argument(
-        "relative_filepath", type=Path, nargs="?", default=Path("applicant_data.json"),
-        help="File to load into PostgreSQL (default: `applicant_data.json`)"
+        "relative_filepath", type=Path, nargs="?", default=DEFAULT_DATA_FILE,
+        help=f"File to load into PostgreSQL (default: `{DEFAULT_DATA_FILE}`)"
     )
     return parser.parse_args()
 
 
 if __name__ == "__main__":
-    # data.py lives in module_2_files/, alongside scrape.py and clean.py.
-    sys.path.insert(0, str(Path(__file__).resolve().parent / "module_2_files"))
-    from data import validate_filepath
+    # paths.py and the scraping package are siblings of database/, both
+    # directly under GradCafeAnalytics/.
+    sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+    from paths import DEFAULT_DATA_FILE
+    from scraping.storage import validate_filepath
 
     cli_args = parse_args()
     validate_filepath(cli_args.relative_filepath, must_exist=True)

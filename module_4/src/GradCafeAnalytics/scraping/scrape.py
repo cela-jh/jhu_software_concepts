@@ -24,7 +24,11 @@ from selenium.common.exceptions import NoSuchElementException
 from bs4 import BeautifulSoup
 
 from clean import clean_data
-from data import save_data, validate_filepath, save_state, load_state, load_existing_urls
+from storage import save_data, validate_filepath, save_state, load_state, load_existing_urls
+
+# paths.py is a sibling of scraping/, directly under GradCafeAnalytics/.
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+from paths import DEFAULT_DATA_FILE, state_path_for
 
 # Force every print() in this process to flush immediately for logging purposes.
 # Helps prevent making a script that is working look hung.
@@ -385,8 +389,8 @@ def parse_args():
         help="Absolute path to the system Chrome binary."
     )
     parser.add_argument(
-        "relative_filepath", type=Path, nargs="?", default=Path("applicant_data.json"),
-        help="File to save results to (default: `applicant_data.json`)"
+        "relative_filepath", type=Path, nargs="?", default=DEFAULT_DATA_FILE,
+        help=f"File to save results to (default: `{DEFAULT_DATA_FILE}`)"
     )
     return parser.parse_args()
 
@@ -428,7 +432,7 @@ def run_scrape(args):
     seen_urls = load_existing_urls(args.relative_filepath)
     result_count = len(seen_urls)
 
-    state_path = args.relative_filepath.with_suffix(".state.json")
+    state_path = state_path_for(args.relative_filepath)
     if pull_mode:
         current_url = admissions_url
         print(f"Pulling new results from page 1 until {args.pull_seen_limit} "

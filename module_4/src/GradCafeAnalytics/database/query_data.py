@@ -5,9 +5,15 @@ Prints answers for Part 2: SQL Query Analysis. Run directly
 answer; `analyze` can also be imported and called on its own.
 """
 import os
+import sys
+from pathlib import Path
 from typing import Callable
 import psycopg
 from psycopg.rows import dict_row
+
+# Ensures db_helpers resolves whether query_data.py is run directly or
+# imported as database.query_data from elsewhere in the package.
+sys.path.insert(0, str(Path(__file__).resolve().parent))
 from db_helpers import connect_db, disconnect_db, CONN_PARAMS
 
 

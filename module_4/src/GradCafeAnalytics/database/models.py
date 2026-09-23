@@ -3,11 +3,16 @@
 SQLAlchemy model for the applicants table, plus the engine and session
 used to connect to the same PostgreSQL database as load_data.py.
 """
+import sys
 from datetime import date
+from pathlib import Path
 
 from sqlalchemy import URL, Date, Float, Text, create_engine
 from sqlalchemy.orm import DeclarativeBase, Mapped, Session, mapped_column
 
+# Ensures db_helpers resolves whether models.py is run directly or imported
+# as database.models from elsewhere in the package.
+sys.path.insert(0, str(Path(__file__).resolve().parent))
 from db_helpers import CONN_PARAMS
 
 

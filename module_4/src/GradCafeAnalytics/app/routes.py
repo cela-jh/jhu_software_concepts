@@ -7,9 +7,9 @@ import os
 
 from flask import Blueprint, jsonify, render_template
 
-from models import get_session
-from orm_queries import ALL_ORM_ANSWERS
-from query_data import QUESTION_QUERY
+from database.models import get_session
+from database.orm_queries import ALL_ORM_ANSWERS
+from database.query_data import QUESTION_QUERY
 
 from . import pull_control
 

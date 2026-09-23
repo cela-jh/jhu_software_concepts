@@ -11,13 +11,10 @@ import subprocess
 import sys
 import threading
 from collections import deque
-from pathlib import Path
 
-from load_data import load_data
+from database.load_data import load_data
+from paths import SCRAPE_SCRIPT, DEFAULT_DATA_FILE as DATA_FILE
 
-MODULE_3_DIR = Path(__file__).resolve().parent.parent
-SCRAPE_SCRIPT = MODULE_3_DIR / "module_2_files" / "scrape.py"
-DATA_FILE = MODULE_3_DIR / "applicant_data.json"
 RECENT_LINES = 5
 CHROME_DEBUG_PORT = 9222
 

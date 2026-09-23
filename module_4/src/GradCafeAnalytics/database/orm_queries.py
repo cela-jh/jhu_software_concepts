@@ -5,8 +5,14 @@ instead of handwritten SQL. Run directly (`python orm_queries.py`, with
 PGUSER/PGPASSWORD set) to print every answer.
 """
 import os
+import sys
+from pathlib import Path
 
 from sqlalchemy import Numeric, and_, case, cast, func, or_, select
+
+# Ensures models resolves whether orm_queries.py is run directly or
+# imported as database.orm_queries from elsewhere in the package.
+sys.path.insert(0, str(Path(__file__).resolve().parent))
 from models import Applicant, get_session
 
 UNIVERSITIES = [

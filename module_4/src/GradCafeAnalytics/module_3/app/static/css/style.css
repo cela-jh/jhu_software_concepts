@@ -1,0 +1,106 @@
+/* USC red background, matching module_1's nav bar color */
+body {
+    font-family: Helvetica, sans-serif;
+    background-color: #990000;
+    color: #000000;
+    margin: 0;
+    padding: 40px;
+}
+
+/* small header above the page title */
+header {
+    font-size: 14px;
+    font-weight: bold;
+    color: #000000;
+    margin-bottom: 4px;
+}
+
+.divider {
+    border: none;
+    border-top: 1px solid #000000;
+    margin: 0 0 24px 0;
+}
+
+h1 {
+    color: #000000;
+    margin: 0;
+}
+
+.controls {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: 12px;
+    margin-bottom: 16px;
+}
+
+.buttons {
+    display: flex;
+    gap: 12px;
+}
+
+.buttons button {
+    font-family: Helvetica, sans-serif;
+    font-size: 14px;
+    font-weight: bold;
+    color: #000000;
+    background-color: #FFCC00;
+    border: none;
+    border-radius: 6px;
+    padding: 10px 16px;
+    cursor: pointer;
+}
+
+.buttons button:disabled {
+    cursor: default;
+    opacity: 0.6;
+}
+
+.explanation {
+    max-width: 800px;
+    margin: 0 0 16px 0;
+}
+
+.status-message {
+    font-weight: bold;
+    min-height: 1.2em;
+    margin: 0 0 8px 0;
+}
+
+.log-box {
+    background-color: #FFCC00;
+    border-radius: 8px;
+    padding: 12px 16px;
+    max-width: 800px;
+    margin-bottom: 24px;
+    font-family: monospace;
+}
+
+.log-line {
+    margin: 0;
+}
+
+.results {
+    display: flex;
+    flex-direction: column;
+    gap: 16px;
+    max-width: 800px;
+}
+
+/* USC gold, matching module_1's hover/accent color */
+.result-box {
+    background-color: #FFCC00;
+    border-radius: 8px;
+    padding: 16px 20px;
+}
+
+.question {
+    font-weight: bold;
+    margin: 0 0 8px 0;
+}
+
+.answer {
+    font-style: italic;
+    margin: 0;
+}

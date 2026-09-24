@@ -118,14 +118,15 @@
 
         updateButton.addEventListener("click", () => {
             updateButton.disabled = true;
-            fetch("/pull/status")
-                .then((response) => response.json())
-                .then((data) => {
-                    if (data.running) {
-                        statusMessage.textContent = "New data is currently being retrieved. Please wait for the pull to finish before updating.";
-                        updateButton.disabled = false;
-                    } else {
+            statusMessage.textContent = "";
+            fetch("/update-analysis", { method: "POST" })
+                .then((response) => response.json().then((data) => ({ ok: response.ok, data })))
+                .then(({ ok, data }) => {
+                    if (ok) {
                         window.location.reload();
+                    } else {
+                        statusMessage.textContent = data.message;
+                        updateButton.disabled = false;
                     }
                 });
         });

@@ -3,13 +3,17 @@
 The analysis page route, and the Pull Data / Update Analysis endpoints
 behind its two buttons.
 """
+import contextlib
+import io
 import os
 
 from flask import Blueprint, jsonify, render_template
 
+from database.load_data import load_data
 from database.models import get_session
 from database.orm_queries import ALL_ORM_ANSWERS
 from database.query_data import QUESTION_QUERY
+from paths import DEFAULT_DATA_FILE
 
 from . import pull_control
 
@@ -82,7 +86,7 @@ def pull_start():
 
     started = pull_control.start(chrome_binary, credentials)
     if not started:
-        return jsonify(status="already_running", message="A pull is already in progress.")
+        return jsonify(status="already_running", message="A pull is already in progress."), 409
     return jsonify(status="started", message="Pull started.")
 
 
@@ -112,3 +116,38 @@ def pull_status():
     Returns JSON: {running, lines}.
     """
     return jsonify(running=pull_control.is_running(), lines=pull_control.recent_lines())
+
+
+@bp.route("/update-analysis", methods=["POST"])
+def update_analysis():
+    """
+    Loads whatever is currently in the results file into PostgreSQL (the
+    same upsert load_data() always does) so data added by hand, by the
+    LLM standardizer, or by a finished pull is reflected without
+    starting a new scrape. analysis() already runs fresh queries on
+    every GET /, so the client reloads afterward to see the results.
+    Busy-gated like Pull Data since a running pull's own upload step
+    already owns the same table.
+    Returns JSON: {status, message}. 409 with status "busy" if a pull is
+    running; 500 with status "error" if PGUSER/PGPASSWORD aren't set;
+    otherwise 200 with status "ok" and load_data()'s own summary as the
+    message.
+    """
+    if pull_control.is_running():
+        return jsonify(status="busy", message=(
+            "New data is currently being retrieved. Please wait for the "
+            "pull to finish before updating."
+        )), 409
+
+    credentials = _pg_credentials()
+    if credentials is None:
+        return jsonify(status="error", message=(
+            "Set the PGUSER and PGPASSWORD environment variables before "
+            "using Update Analysis."
+        )), 500
+
+    buffer = io.StringIO()
+    with contextlib.redirect_stdout(buffer):
+        load_data(DEFAULT_DATA_FILE, credentials)
+
+    return jsonify(status="ok", message=buffer.getvalue().strip() or "Analysis updated.")

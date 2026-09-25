@@ -29,6 +29,15 @@ def _round2(expr):
     return func.round(cast(expr, Numeric), 2)
 
 
+def _format_percentage(value):
+    """
+    Formats a percentage value with exactly two decimal places (e.g.
+    50 becomes "50.00%", not "50.0%" or "50%"), regardless of whether it
+    arrived as a Decimal from SQL-side rounding or a plain Python float.
+    """
+    return f"{float(value):.2f}%"
+
+
 def orm_q1(session):
     """How many entries are from applicants who applied for Fall 2026?"""
     count = session.execute(
@@ -46,7 +55,7 @@ def orm_q2(session):
         select(_round2(func.sum(international) * 100.0 / func.count(Applicant.us_or_international)))
         .where(Applicant.us_or_international.is_not(None))
     ).scalar_one()
-    return f"International percentage: {pct}%"
+    return f"International percentage: {_format_percentage(pct)}"
 
 
 def orm_q3(session):
@@ -89,7 +98,7 @@ def orm_q5(session):
         select(_round2(func.sum(accepted) * 100.0 / func.count(Applicant.status)))
         .where(Applicant.term == "Fall 2025")
     ).scalar_one()
-    return f"Percentage accepted: {pct}%"
+    return f"Percentage accepted: {_format_percentage(pct)}"
 
 
 def orm_q6(session):
@@ -190,7 +199,7 @@ def orm_a1(session):
         key=lambda row: (int(row.term.split()[1]), 0 if row.term.startswith("Spring") else 1)
     )
     parts = [
-        f"{row.term} acceptance: {round(row.cnt * 100.0 / total_accepted, 2)}%"
+        f"{row.term} acceptance: {_format_percentage(row.cnt * 100.0 / total_accepted)}"
         for row in ordered
     ]
     return ", ".join(parts)

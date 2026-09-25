@@ -18,6 +18,13 @@ import psycopg
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from db_helpers import connect_db, disconnect_db, CONN_PARAMS
 
+# paths.py is a sibling of database/, directly under GradCafeAnalytics/.
+# Imported unconditionally (not just under `if __name__`) since
+# parse_args() needs DEFAULT_DATA_FILE whether or not this module is
+# being run as a script.
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+from paths import DEFAULT_DATA_FILE
+
 
 REQUIRED_FIELDS = {
     "program": "program",
@@ -360,10 +367,7 @@ def parse_args():
 
 
 if __name__ == "__main__":
-    # paths.py and the scraping package are siblings of database/, both
-    # directly under GradCafeAnalytics/.
-    sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
-    from paths import DEFAULT_DATA_FILE
+    # scraping/ is a sibling of database/, directly under GradCafeAnalytics/.
     from scraping.storage import validate_filepath
 
     cli_args = parse_args()

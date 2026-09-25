@@ -123,3 +123,76 @@ def test_pull_start_returns_409_when_busy(client, monkeypatch):
     assert response.status_code == 409
     assert response.get_json()["status"] == "already_running"
     assert popen_calls == []
+
+
+@pytest.mark.buttons
+def test_pull_start_returns_error_when_chrome_binary_missing(client, monkeypatch):
+    """POST /pull/start should report a clear error, and never touch
+    pull_control at all, when CHROME_BINARY isn't set."""
+    monkeypatch.delenv("CHROME_BINARY", raising=False)
+    monkeypatch.setenv("PGUSER", "test_user")
+    monkeypatch.setenv("PGPASSWORD", "test_password")
+
+    response = client.post("/pull/start")
+
+    assert response.status_code == 200
+    body = response.get_json()
+    assert body["status"] == "error"
+    assert "CHROME_BINARY" in body["message"]
+
+
+@pytest.mark.buttons
+def test_pull_start_returns_error_when_credentials_missing(client, monkeypatch):
+    """POST /pull/start should report a clear error when PGUSER/
+    PGPASSWORD aren't set, even with CHROME_BINARY present."""
+    monkeypatch.setenv("CHROME_BINARY", "/fake/chrome")
+    monkeypatch.delenv("PGUSER", raising=False)
+    monkeypatch.delenv("PGPASSWORD", raising=False)
+
+    response = client.post("/pull/start")
+
+    assert response.status_code == 200
+    body = response.get_json()
+    assert body["status"] == "error"
+    assert "PGUSER" in body["message"]
+
+
+@pytest.mark.buttons
+def test_update_analysis_returns_error_when_credentials_missing(client, monkeypatch):
+    """POST /update-analysis should report a clear 500 error, and never
+    call load_data, when PGUSER/PGPASSWORD aren't set."""
+    monkeypatch.delenv("PGUSER", raising=False)
+    monkeypatch.delenv("PGPASSWORD", raising=False)
+    load_calls = []
+    monkeypatch.setattr(
+        "app.routes.load_data",
+        lambda filepath, credentials: load_calls.append((filepath, credentials)),
+    )
+
+    response = client.post("/update-analysis")
+
+    assert response.status_code == 500
+    assert response.get_json()["status"] == "error"
+    assert load_calls == []
+
+
+@pytest.mark.buttons
+def test_pull_cancel_route_reports_not_running_when_idle(client):
+    """POST /pull/cancel with no pull active should report "not_running"
+    through the real HTTP route, not just pull_control.cancel() directly."""
+    response = client.post("/pull/cancel")
+
+    assert response.status_code == 200
+    assert response.get_json()["status"] == "not_running"
+
+
+@pytest.mark.buttons
+def test_pull_status_route_reports_idle_state(client):
+    """GET /pull/status with no pull active should report running=False
+    and an empty log."""
+    response = client.get("/pull/status")
+
+    assert response.status_code == 200
+    body = response.get_json()
+    assert body["running"] is False
+    assert body["lines"] == []

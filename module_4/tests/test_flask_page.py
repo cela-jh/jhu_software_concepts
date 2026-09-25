@@ -65,3 +65,16 @@ def test_analysis(client, monkeypatch):
     assert "Update Analysis" in page
     assert "Analysis" in page
     assert "Answer:" in page
+
+
+@pytest.mark.web
+def test_analysis_page_returns_500_when_credentials_missing(client, monkeypatch):
+    """GET / should fail clearly, not crash, when PGUSER/PGPASSWORD
+    aren't set - it must never reach get_session() at all."""
+    monkeypatch.delenv("PGUSER", raising=False)
+    monkeypatch.delenv("PGPASSWORD", raising=False)
+
+    response = client.get("/")
+
+    assert response.status_code == 500
+    assert "PGUSER" in response.get_data(as_text=True)

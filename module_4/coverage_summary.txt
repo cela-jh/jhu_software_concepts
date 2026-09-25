@@ -1,0 +1,31 @@
+........................................................................ [ 35%]
+........................................................................ [ 70%]
+...........................................................              [100%]
+
+---------- coverage: platform darwin, python 3.12.2-final-0 ----------
+Name                                                       Stmts   Miss  Cover   Missing
+----------------------------------------------------------------------------------------
+module_4/src/GradCafeAnalytics/__init__.py                     0      0   100%
+module_4/src/GradCafeAnalytics/app.py                          9      0   100%
+module_4/src/GradCafeAnalytics/app/__init__.py                 7      0   100%
+module_4/src/GradCafeAnalytics/app/pull_control.py            64      0   100%
+module_4/src/GradCafeAnalytics/app/routes.py                  59      0   100%
+module_4/src/GradCafeAnalytics/database/__init__.py            0      0   100%
+module_4/src/GradCafeAnalytics/database/db_helpers.py         25      0   100%
+module_4/src/GradCafeAnalytics/database/load_data.py         153      0   100%
+module_4/src/GradCafeAnalytics/database/models.py             32      0   100%
+module_4/src/GradCafeAnalytics/database/orm_queries.py        79      0   100%
+module_4/src/GradCafeAnalytics/database/query_data.py         58      0   100%
+module_4/src/GradCafeAnalytics/llm_hosting/__init__.py         0      0   100%
+module_4/src/GradCafeAnalytics/llm_hosting/app.py            170      0   100%
+module_4/src/GradCafeAnalytics/llm_hosting/llm_helper.py     125      0   100%
+module_4/src/GradCafeAnalytics/paths.py                       11      0   100%
+module_4/src/GradCafeAnalytics/scraping/__init__.py            0      0   100%
+module_4/src/GradCafeAnalytics/scraping/clean.py              92      0   100%
+module_4/src/GradCafeAnalytics/scraping/scrape.py            257      0   100%
+module_4/src/GradCafeAnalytics/scraping/storage.py            42      0   100%
+----------------------------------------------------------------------------------------
+TOTAL                                                       1183      0   100%
+
+Required test coverage of 100% reached. Total coverage: 100.00%
+203 passed in 1.76s

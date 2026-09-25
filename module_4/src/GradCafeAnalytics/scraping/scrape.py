@@ -23,6 +23,9 @@ from selenium.webdriver.common.by import By
 from selenium.common.exceptions import NoSuchElementException
 from bs4 import BeautifulSoup
 
+# Ensures clean/storage resolve whether scrape.py is run directly or
+# imported as scraping.scrape from elsewhere in the package.
+sys.path.insert(0, str(Path(__file__).resolve().parent))
 from clean import clean_data
 from storage import save_data, validate_filepath, save_state, load_state, load_existing_urls
 

@@ -17,6 +17,7 @@ Cameron Ela, cela1@jh.edu
 9. [Robots.txt Compliance](#9-robotstxt-compliance)
 10. [Known Bugs / Limitations](#10-known-bugs--limitations)
 11. [Citations](#11-citations)
+12. [Testing](#12-testing)
 
 ## 1. Overview
 
@@ -108,9 +109,9 @@ Validates every result, skips and reports any missing required fields, and upser
 
 **Running the analysis webpage:**
 ```
-PGUSER=youruser PGPASSWORD=yourpassword PGDATABASE=yourdb CHROME_BINARY="<path to Chrome>" python src/GradCafeAnalytics/app.py
+PGUSER=youruser PGPASSWORD=yourpassword PGDATABASE=yourdb CHROME_BINARY="<path to Chrome>" python src/GradCafeAnalytics/app.py [--file path/to/results.json]
 ```
-Open http://127.0.0.1:5000/. Every answer is read live from PostgreSQL through the `Applicant` model on each page load. `CHROME_BINARY` is only needed for Pull Data.
+Open http://127.0.0.1:5000/. Every answer is read live from PostgreSQL through the `Applicant` model on each page load. `CHROME_BINARY` is only needed for Pull Data. `--file` is optional and defaults to `data/applicant_data.json`; when set, both Pull Data (what it writes to and loads from) and Update Analysis (what it re-syncs) use that file instead - for example, pointing at `data/llm_extend_applicant_data.json` to keep the LLM-standardized fields flowing through Update Analysis.
 
 ### Pull Data and Update Analysis
 
@@ -311,4 +312,43 @@ GradCafe's robots.txt was reviewed manually before writing any scraping code and
 
 ## 11. Citations
 
-- **CLAUDE**: Used primarily as an advisor, guide, and error catcher. Considered edge cases and helped develop error-catching methods. Played major role in refactoring code into organized directories, repairing broken filepaths and imports and ensuring they wouldn't break with future refactoring. Created most of this README.
+### CLAUDE
+
+- Wrote test cases in small sets, stopping for human review after each test file with back-and-forth questions and explanations for understanding and covering edge cases
+- Considered edge cases and helped develop error-catching methods
+- Played major role in refactoring code into organized directories, repairing broken filepaths and imports and ensuring they wouldn't break with future refactoring
+- Created most of this README
+
+## 12. Testing
+
+### Setup
+
+1. Create and activate `module_4/venv`, then `pip install -r requirements.txt` (already covers `pytest`, `pytest-cov`, `pytest-randomly`, and every runtime dependency, including `llm_hosting`'s).
+2. Create a disposable `cam_db_test` PostgreSQL database with the same schema as `cam_db` (see [section 6](#6-loading-into-postgresql)) - the test suite never touches `cam_db`'s real data. `database/db_helpers.py`'s `CONN_PARAMS["dbname"]` reads the `PGDATABASE` environment variable; `tests/conftest.py` sets it to `cam_db_test` before anything else imports `database.db_helpers`, so this happens automatically for every test run.
+3. Local trust-authed PostgreSQL doesn't check the password's contents, only that `PGUSER`/`PGPASSWORD` are both non-empty (some code paths treat an empty string the same as unset) - any non-empty value works for `PGPASSWORD` when testing locally.
+
+### Running the suite
+
+**Always run from the repository root** (`jhu_software_concepts/`, the parent of `module_4/`), with the `module_4/tests` path included:
+
+```
+pytest module_4/tests -m "web or buttons or analysis or db or integration"
+```
+
+This differs from the assignment instructions, which give the bare form (`pytest -m "web or buttons or analysis or db or integration"`, with no path) as the command that must run the full suite. That exact bare command does not work correctly from any single directory, for a structural reason rather than a configuration mistake: `pytest.ini` lives in `module_4/` (per the assignment's own required file tree), but its `addopts` sets `--cov=module_4/src`, a path resolved relative to the invocation directory rather than to `pytest.ini`'s own location. Pytest's config-file search only looks *upward* from the current directory, never into subdirectories, and only when at least one path argument is given does that search start from somewhere other than the bare current directory. Concretely:
+
+- Bare `pytest -m "..."` from `module_4/`: finds `pytest.ini` (it's the current directory), but `--cov=module_4/src` then resolves to the nonexistent `module_4/module_4/src` - fails with "Total coverage: 0.00%".
+- Bare `pytest -m "..."` from the repository root: `--cov=module_4/src` would resolve correctly, but `pytest.ini` is never found at all (it's in a subdirectory, not an ancestor of the repository root), so no markers or coverage settings apply.
+- `pytest module_4/tests -m "..."` from the repository root: the given path's directory is where pytest's config search starts, walking upward from `module_4/tests` and finding `module_4/pytest.ini` immediately, while `--cov=module_4/src` is correct relative to the repository root (the invocation directory). This is the only invocation of the three that satisfies both at once, which is why it's what this project actually uses.
+
+Every test is marked with exactly one of `web`, `buttons`, `analysis`, `db`, or `integration` (registered in `pytest.ini`); running the full unmarked `pytest module_4/tests` also works and is equivalent, since every test already carries one of these five marks.
+
+### Coverage
+
+`pytest.ini`'s `--cov-fail-under=100` enforces 100% statement coverage across every file under `module_4/src`, including `scraping/` (Selenium/subprocess mocked, never a real browser) and `llm_hosting/` (the real `Llama`/`hf_hub_download` calls mocked, never a real model load or network request). `pytest.ini`'s own `[report]` section (read via `addopts`' `--cov-config=module_4/pytest.ini`, since coverage.py otherwise only looks for a `.coveragerc` in the invocation directory) excludes each file's `if __name__ == "__main__":` guard line - and, since excluding a compound statement's header excludes its whole block, everything under it - from that count, since that code only ever runs when a script is invoked directly, never via `import`, which is all `pytest` ever does. The current terminal summary is committed at `module_4/coverage_summary.txt`.
+
+### Notes on test design
+
+- `llm_hosting/app.py` and `llm_hosting/llm_helper.py` are loaded via `importlib` under names other than `app` (e.g. `llm_app`), since a bare `import app` would resolve to the already-imported Flask `app` package from `src/GradCafeAnalytics/app/` instead (whichever module claims the name `app` in `sys.modules` first wins, for the rest of the process). `llm_helper.run_parallel()`'s own lazy `from app import _get_model_path` is satisfied in tests by temporarily inserting a fake module into `sys.modules["app"]`.
+- Database tests use a real local PostgreSQL connection (`cam_db_test`), not a mocked one, so schema/constraint behavior (`NOT NULL`, `UNIQUE`, upsert-on-conflict) is verified for real rather than assumed.
+- Selenium, subprocess, and `urllib` calls in `scraping/scrape.py` are mocked at the point of use in every test; no test here ever launches a real Chrome instance or makes a real HTTP request.

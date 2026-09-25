@@ -54,17 +54,21 @@ def orm_q1(session):
     count = session.execute(
         select(func.count())
         .select_from(Applicant)
-        .where(Applicant.term == "Fall 2026")
+        .where(Applicant.term.ilike("Fall 2026"))
     ).scalar_one()
     return f"Applicant count: {count}"
 
 
 def orm_q2(session):
     """Percentage of entries with a usable nationality classification that are international."""
-    international = case((Applicant.us_or_international == "International", 1), else_=0)
+    usable = and_(
+        Applicant.us_or_international.is_not(None),
+        Applicant.us_or_international != "",
+    )
+    international = case((Applicant.us_or_international.ilike("International"), 1), else_=0)
     pct = session.execute(
-        select(_round2(func.sum(international) * 100.0 / func.count(Applicant.us_or_international)))
-        .where(Applicant.us_or_international.is_not(None))
+        select(_round2(func.sum(international) * 100.0 / func.count()))
+        .where(usable)
     ).scalar_one()
     return f"International percentage: {_format_percentage(pct)}"
 
@@ -94,8 +98,8 @@ def orm_q4(session):
         .where(
             and_(
                 Applicant.gpa.is_not(None),
-                Applicant.us_or_international == "American",
-                Applicant.term == "Fall 2026",
+                Applicant.us_or_international.ilike("American"),
+                Applicant.term.ilike("Fall 2026"),
             )
         )
     ).scalar_one()
@@ -106,8 +110,11 @@ def orm_q5(session):
     """Percentage of Fall 2025 entries that are acceptances."""
     accepted = case((Applicant.status.ilike("Accepted%"), 1), else_=0)
     pct = session.execute(
-        select(_round2(func.sum(accepted) * 100.0 / func.count(Applicant.status)))
-        .where(Applicant.term == "Fall 2025")
+        # The denominator counts every Fall 2025 row via count(), not
+        # count(status), so a NULL-status row is still counted (it just
+        # never contributes to the numerator via the CASE above).
+        select(_round2(func.sum(accepted) * 100.0 / func.count()))
+        .where(Applicant.term.ilike("Fall 2025"))
     ).scalar_one()
     return f"Percentage accepted: {_format_percentage(pct)}"
 
@@ -118,7 +125,7 @@ def orm_q6(session):
         select(_round2(func.avg(Applicant.gpa)))
         .where(
             and_(
-                Applicant.term == "Fall 2026",
+                Applicant.term.ilike("Fall 2026"),
                 Applicant.gpa.is_not(None),
                 Applicant.status.ilike("Accepted%"),
             )
@@ -154,7 +161,7 @@ def _q8_count(session):
         .select_from(Applicant)
         .where(
             and_(
-                Applicant.term == "Fall 2026",
+                Applicant.term.ilike("Fall 2026"),
                 Applicant.degree.ilike("PhD"),
                 Applicant.status.ilike("Accepted%"),
                 Applicant.program.ilike("Computer Science, %"),
@@ -178,7 +185,7 @@ def orm_q9(session):
         .select_from(Applicant)
         .where(
             and_(
-                Applicant.term == "Fall 2026",
+                Applicant.term.ilike("Fall 2026"),
                 Applicant.degree.ilike("PhD"),
                 Applicant.status.ilike("Accepted%"),
                 Applicant.llm_generated_program.ilike("Computer Science"),
@@ -248,13 +255,13 @@ ALL_ORM_ANSWERS = [
 ]
 
 
-def run_orm_queries(credentials: tuple[str, str]):
+def run_orm_queries(database_url: str):
     """
     Opens a SQLAlchemy session against the applicants table and prints the
     answer to each question in ORM_QUESTIONS.
     Returns none.
     """
-    session = get_session(credentials)
+    session = get_session(database_url)
     try:
         for question in ORM_QUESTIONS:
             print(question(session))
@@ -262,21 +269,19 @@ def run_orm_queries(credentials: tuple[str, str]):
         session.close()
 
 
-def _pg_credentials():
+def _database_url():
     """
-    Reads database credentials from the PGUSER/PGPASSWORD environment
-    variables.
-    Returns a (user, password) tuple.
-    Raises EnvironmentError if either variable isn't set.
+    Reads the DATABASE_URL environment variable.
+    Returns the connection string.
+    Raises EnvironmentError if it isn't set.
     """
-    user = os.getenv("PGUSER")
-    password = os.getenv("PGPASSWORD")
-    if not user or not password:
+    database_url = os.getenv("DATABASE_URL")
+    if not database_url:
         raise EnvironmentError(
-            "Set the PGUSER and PGPASSWORD environment variables before running this script."
+            "Set the DATABASE_URL environment variable before running this script."
         )
-    return user, password
+    return database_url
 
 
 if __name__ == "__main__":
-    run_orm_queries(_pg_credentials())
+    run_orm_queries(_database_url())

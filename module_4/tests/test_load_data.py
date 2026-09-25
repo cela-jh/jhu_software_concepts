@@ -7,11 +7,17 @@ violation, the score-cleanup and nationality-normalization print
 branches, file-level error handling, and the CLI's parse_args().
 """
 import json
+import os
+import subprocess
+import sys
+from pathlib import Path
 
 import pytest
 
 import database.load_data as load_data
 from helpers import fake_applicant_row
+
+LOAD_DATA_SCRIPT = Path(load_data.__file__).resolve()
 
 
 @pytest.mark.db
@@ -49,37 +55,42 @@ def test_build_row_raises_on_missing_required_field():
 
 
 @pytest.mark.db
-def test_load_data_reports_and_skips_invalid_results(tmp_path, db_connection, db_credentials, capsys):
+def test_load_data_reports_and_skips_invalid_results(tmp_path, db_connection, database_url, capsys):
     """A file mixing one valid and one invalid result should load the
-    valid one and report the invalid one as skipped, not crash."""
+    valid one and report the invalid one as skipped, not crash - and
+    still report success overall, since the file was read and the
+    database was reached."""
     data_file = tmp_path / "applicant_data.json"
     invalid_row = fake_applicant_row(9000002)
     del invalid_row["program"]
     data_file.write_text(json.dumps([fake_applicant_row(9000001), invalid_row]))
 
-    load_data.load_data(data_file, db_credentials)
+    result = load_data.load_data(data_file, database_url)
 
+    assert result is True
     printed = capsys.readouterr().out
     assert "Skipped 1 results with missing or invalid fields" in printed
     assert "Loaded 1 new results" in printed
 
 
 @pytest.mark.db
-def test_load_data_reports_missing_file(tmp_path, db_credentials, capsys):
+def test_load_data_reports_missing_file(tmp_path, database_url, capsys):
     missing_file = tmp_path / "does_not_exist.json"
 
-    load_data.load_data(missing_file, db_credentials)
+    result = load_data.load_data(missing_file, database_url)
 
+    assert result is False
     assert "Could not find the file" in capsys.readouterr().out
 
 
 @pytest.mark.db
-def test_load_data_reports_invalid_json(tmp_path, db_credentials, capsys):
+def test_load_data_reports_invalid_json(tmp_path, database_url, capsys):
     bad_file = tmp_path / "not_json.json"
     bad_file.write_text("{not valid json")
 
-    load_data.load_data(bad_file, db_credentials)
+    result = load_data.load_data(bad_file, database_url)
 
+    assert result is False
     assert "is not valid JSON" in capsys.readouterr().out
 
 
@@ -87,10 +98,11 @@ def test_load_data_reports_invalid_json(tmp_path, db_credentials, capsys):
 def test_load_data_returns_quietly_when_connection_fails(tmp_path, monkeypatch, capsys):
     data_file = tmp_path / "applicant_data.json"
     data_file.write_text(json.dumps([fake_applicant_row(9000003)]))
-    monkeypatch.setattr(load_data, "connect_db", lambda conn_params, credentials: None)
+    monkeypatch.setattr(load_data, "connect_db", lambda url: None)
 
-    load_data.load_data(data_file, ("cameronela", "test_password"))
+    result = load_data.load_data(data_file, "postgresql://nowhere/nothing")
 
+    assert result is False
     assert capsys.readouterr().out == ""
 
 
@@ -197,3 +209,24 @@ def test_parse_args_accepts_explicit_filepath(monkeypatch):
     args = load_data.parse_args()
 
     assert str(args.relative_filepath) == "custom_file.json"
+
+
+@pytest.mark.db
+def test_cli_exits_nonzero_when_database_unreachable(tmp_path):
+    """Running load_data.py as a real script against a database that
+    can't be reached should exit non-zero, not silently exit 0, so a
+    caller (a shell script, CI step, cron job) can tell an unsuccessful
+    load apart from a completed one."""
+    data_file = tmp_path / "applicant_data.json"
+    data_file.write_text(json.dumps([fake_applicant_row(9999999)]))
+
+    result = subprocess.run(
+        [sys.executable, str(LOAD_DATA_SCRIPT), str(data_file)],
+        env={
+            **os.environ,
+            "DATABASE_URL": "postgresql://localhost:5432/definitely_not_a_real_database",
+        },
+        capture_output=True, text=True,
+    )
+
+    assert result.returncode != 0

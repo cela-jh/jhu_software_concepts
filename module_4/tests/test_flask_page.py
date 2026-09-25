@@ -5,6 +5,7 @@ its buttons depend on, and that the analysis page itself renders the
 required structure.
 """
 import pytest
+from sqlalchemy.exc import OperationalError
 
 
 class _FakeSession:
@@ -30,34 +31,32 @@ def _rule_methods(app, path):
 
 @pytest.mark.web
 def test_app_factory_creates_required_routes(app):
-    """create_app() should register the analysis page (index) and every route
+    """create_app() should register the analysis page and every route
     the Pull Data / Update Analysis buttons call."""
     rule_paths = {rule.rule for rule in app.url_map.iter_rules()}
 
-    assert "/" in rule_paths
-    assert "/pull/start" in rule_paths
+    assert "/analysis" in rule_paths
+    assert "/pull-data" in rule_paths
     assert "/pull/cancel" in rule_paths
     assert "/pull/status" in rule_paths
     assert "/update-analysis" in rule_paths
 
-    assert "GET" in _rule_methods(app, "/")
+    assert "GET" in _rule_methods(app, "/analysis")
     assert "GET" in _rule_methods(app, "/pull/status")
-    assert "POST" in _rule_methods(app, "/pull/start")
+    assert "POST" in _rule_methods(app, "/pull-data")
     assert "POST" in _rule_methods(app, "/pull/cancel")
     assert "POST" in _rule_methods(app, "/update-analysis")
 
 
 @pytest.mark.web
 def test_analysis(client, monkeypatch):
-    """GET / should render 200 with both buttons and at least one
+    """GET /analysis should render 200 with both buttons and at least one
     labeled answer, without needing a real PostgreSQL connection."""
-    monkeypatch.setenv("PGUSER", "test_user")
-    monkeypatch.setenv("PGPASSWORD", "test_password")
-    monkeypatch.setattr("app.routes.get_session", lambda credentials: _FakeSession())
+    monkeypatch.setattr("app.routes.get_session", lambda database_url: _FakeSession())
     monkeypatch.setattr("app.routes.ALL_ORM_ANSWERS", FAKE_ANSWERS)
     monkeypatch.setattr("app.routes.QUESTION_QUERY", FAKE_QUESTION_QUERY)
 
-    response = client.get("/")
+    response = client.get("/analysis")
 
     assert response.status_code == 200
     page = response.get_data(as_text=True)
@@ -69,12 +68,28 @@ def test_analysis(client, monkeypatch):
 
 @pytest.mark.web
 def test_analysis_page_returns_500_when_credentials_missing(client, monkeypatch):
-    """GET / should fail clearly, not crash, when PGUSER/PGPASSWORD
-    aren't set - it must never reach get_session() at all."""
-    monkeypatch.delenv("PGUSER", raising=False)
-    monkeypatch.delenv("PGPASSWORD", raising=False)
+    """GET /analysis should fail clearly, not crash, when DATABASE_URL
+    isn't set - it must never reach get_session() at all."""
+    monkeypatch.delenv("DATABASE_URL", raising=False)
 
-    response = client.get("/")
+    response = client.get("/analysis")
 
     assert response.status_code == 500
-    assert "PGUSER" in response.get_data(as_text=True)
+    assert "DATABASE_URL" in response.get_data(as_text=True)
+
+
+@pytest.mark.web
+def test_analysis_page_returns_503_when_database_unavailable(client, monkeypatch):
+    """GET /analysis should fail with a clear, readable message - not an
+    unhandled 500 traceback - when PostgreSQL itself can't be reached."""
+    def _raise_operational_error(session):
+        raise OperationalError("statement", {}, Exception("connection refused"))
+
+    monkeypatch.setattr("app.routes.get_session", lambda database_url: _FakeSession())
+    monkeypatch.setattr("app.routes.ALL_ORM_ANSWERS", [_raise_operational_error])
+    monkeypatch.setattr("app.routes.QUESTION_QUERY", FAKE_QUESTION_QUERY)
+
+    response = client.get("/analysis")
+
+    assert response.status_code == 503
+    assert "database is currently unavailable" in response.get_data(as_text=True)

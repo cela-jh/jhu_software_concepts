@@ -26,10 +26,8 @@ def _start_pull(client, monkeypatch, data_file):
     monkeypatch.setattr("app.routes.DEFAULT_DATA_FILE", data_file)
     monkeypatch.setattr("app.pull_control.subprocess.Popen", lambda *a, **kw: FakeProcess())
     monkeypatch.setenv("CHROME_BINARY", "/fake/chrome")
-    monkeypatch.setenv("PGUSER", "cameronela")
-    monkeypatch.setenv("PGPASSWORD", "test_password")
 
-    response = client.post("/pull/start")
+    response = client.post("/pull-data")
     pull_control._thread.join(timeout=5)
     return response
 
@@ -57,7 +55,7 @@ def test_pull_update_render_end_to_end(client, monkeypatch, tmp_path, db_connect
     assert update_response.status_code == 200
     assert update_response.get_json()["status"] == "ok"
 
-    render_response = client.get("/")
+    render_response = client.get("/analysis")
     assert render_response.status_code == 200
     page = render_response.get_data(as_text=True)
 

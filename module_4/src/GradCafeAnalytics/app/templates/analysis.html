@@ -12,8 +12,8 @@
     <div class="controls">
         <h1>Analysis</h1>
         <div class="buttons">
-            <button id="pull-button" type="button">Pull Data</button>
-            <button id="update-button" type="button">Update Analysis</button>
+            <button id="pull-button" data-testid="pull-data-btn" type="button">Pull Data</button>
+            <button id="update-button" data-testid="update-analysis-btn" type="button">Update Analysis</button>
         </div>
     </div>
     <p class="explanation">
@@ -103,12 +103,12 @@
                     });
             } else {
                 statusMessage.textContent = "";
-                fetch("/pull/start", { method: "POST" })
+                fetch("/pull-data", { method: "POST" })
                     .then((response) => response.json())
                     .then((data) => {
                         statusMessage.textContent = data.message;
                         pullButton.disabled = false;
-                        if (data.status === "started" || data.status === "already_running") {
+                        if (data.ok || data.busy) {
                             setRunningUi(true);
                             startPolling();
                         }

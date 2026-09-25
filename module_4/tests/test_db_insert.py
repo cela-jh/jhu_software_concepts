@@ -15,7 +15,7 @@ from helpers import FakeProcess, fake_applicant_row, write_fake_scraped_data
 @pytest.mark.db
 def test_pull_inserts_rows_with_required_fields(client, monkeypatch, tmp_path, db_connection):
     """Before a pull, the table is empty (guaranteed by db_connection).
-    After POST /pull/start, the faked scraper's rows should be loaded
+    After POST /pull-data, the faked scraper's rows should be loaded
     into PostgreSQL with every required field populated."""
     with db_connection.cursor() as cursor:
         cursor.execute("SELECT count(*) FROM applicants")
@@ -27,10 +27,8 @@ def test_pull_inserts_rows_with_required_fields(client, monkeypatch, tmp_path, d
     monkeypatch.setattr(pull_control, "DATA_FILE", data_file)
     monkeypatch.setattr("app.pull_control.subprocess.Popen", lambda *a, **kw: FakeProcess())
     monkeypatch.setenv("CHROME_BINARY", "/fake/chrome")
-    monkeypatch.setenv("PGUSER", "cameronela")
-    monkeypatch.setenv("PGPASSWORD", "test_password")
 
-    response = client.post("/pull/start")
+    response = client.post("/pull-data")
     assert response.status_code == 200
     pull_control._thread.join(timeout=5)
 
@@ -57,10 +55,8 @@ def test_repeated_pull_does_not_duplicate_rows(client, monkeypatch, tmp_path, db
     monkeypatch.setattr(pull_control, "DATA_FILE", data_file)
     monkeypatch.setattr("app.pull_control.subprocess.Popen", lambda *a, **kw: FakeProcess())
     monkeypatch.setenv("CHROME_BINARY", "/fake/chrome")
-    monkeypatch.setenv("PGUSER", "cameronela")
-    monkeypatch.setenv("PGPASSWORD", "test_password")
 
-    first_response = client.post("/pull/start")
+    first_response = client.post("/pull-data")
     assert first_response.status_code == 200
     pull_control._thread.join(timeout=5)
 
@@ -70,7 +66,7 @@ def test_repeated_pull_does_not_duplicate_rows(client, monkeypatch, tmp_path, db
 
     # A second pull over the exact same (unchanged) data file, simulating
     # a re-scrape that finds nothing new.
-    second_response = client.post("/pull/start")
+    second_response = client.post("/pull-data")
     assert second_response.status_code == 200
     pull_control._thread.join(timeout=5)
 

@@ -6,15 +6,10 @@ src/GradCafeAnalytics on the import path so tests can import `app`,
 does when app.py is run directly, then hands out a fresh Flask app and
 test client per test.
 """
+import getpass
 import os
 import sys
 from pathlib import Path
-
-# Must be set before anything below imports database.db_helpers (which
-# reads PGDATABASE at import time into CONN_PARAMS), so the whole test
-# session talks to the disposable cam_db_test database, never cam_db's
-# real data.
-os.environ["PGDATABASE"] = "cam_db_test"
 
 SRC_DIR = Path(__file__).resolve().parent.parent / "src" / "GradCafeAnalytics"
 sys.path.insert(0, str(SRC_DIR))
@@ -23,9 +18,20 @@ import pytest
 
 from app import create_app
 from app import pull_control
-from database.db_helpers import CONN_PARAMS, connect_db, disconnect_db
+from database.db_helpers import connect_db, disconnect_db
 
-TEST_DB_CREDENTIALS = ("cameronela", "test_password")
+# The disposable cam_db_test database, never cam_db's real data. Built
+# from the current OS user rather than a hardcoded name, since local
+# trust auth authenticates by OS/role name and this must work on
+# whatever machine the suite runs on, not just one developer's; the
+# password segment is omitted entirely since trust auth ignores it.
+TEST_DATABASE_URL = f"postgresql://{getpass.getuser()}@localhost:5432/cam_db_test"
+
+# Set once for the whole session; database.db_helpers/models read
+# DATABASE_URL fresh at call time (not at import time), so this just
+# needs to be in place before any test actually makes a request or
+# opens a connection - not before any particular import.
+os.environ["DATABASE_URL"] = TEST_DATABASE_URL
 
 
 @pytest.fixture
@@ -63,30 +69,27 @@ def reset_pull_control():
 
 
 @pytest.fixture
-def db_credentials():
-    """(user, password) for the local trust-authed cam_db_test database.
-    The password value itself is ignored by trust auth; it only needs to
-    be non-empty, since _pg_credentials()-style checks elsewhere treat an
-    empty string the same as unset."""
-    return TEST_DB_CREDENTIALS
+def database_url():
+    """The disposable test database's DATABASE_URL connection string."""
+    return TEST_DATABASE_URL
 
 
 @pytest.fixture
-def db_connection(db_credentials):
+def db_connection(database_url):
     """
     Connects to cam_db_test and truncates the applicants table before
     and after the test, so every db-marked test starts and ends with an
     empty table regardless of what other tests did.
-    Refuses to run at all if CONN_PARAMS somehow isn't pointed at the
-    disposable test database, so a broken PGDATABASE override can never
-    truncate real data.
+    Refuses to run at all if DATABASE_URL somehow isn't pointed at the
+    disposable test database, so a broken override can never truncate
+    real data.
     """
-    assert CONN_PARAMS["dbname"] == "cam_db_test", (
+    assert "cam_db_test" in database_url, (
         "Refusing to run db tests against a non-test database: "
-        f"CONN_PARAMS['dbname'] is {CONN_PARAMS['dbname']!r}"
+        f"DATABASE_URL is {database_url!r}"
     )
 
-    conn = connect_db(CONN_PARAMS, db_credentials)
+    conn = connect_db(database_url)
     assert conn is not None, "Could not connect to cam_db_test"
 
     conn.execute("TRUNCATE applicants")

@@ -10,13 +10,13 @@ from database.db_helpers import connect_db, pretty_print_query
 
 
 @pytest.mark.db
-def test_connect_db_returns_none_on_failure(db_credentials):
+def test_connect_db_returns_none_on_failure():
     """A connection attempt against a database that doesn't exist should
     fail cleanly and return None rather than raising - this hits a real
     Postgres error locally, no network dependency."""
-    bad_params = {"dbname": "definitely_not_a_real_database", "host": "localhost", "port": 5432}
+    bad_url = "postgresql://localhost:5432/definitely_not_a_real_database"
 
-    conn = connect_db(bad_params, db_credentials)
+    conn = connect_db(bad_url)
 
     assert conn is None
 

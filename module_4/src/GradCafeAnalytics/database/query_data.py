@@ -1,7 +1,7 @@
 """
 `query_data.py`
 Prints answers for Part 2: SQL Query Analysis. Run directly
-(`python query_data.py`, with PGUSER/PGPASSWORD set) to print every
+(`python query_data.py`, with DATABASE_URL set) to print every
 answer; `analyze` can also be imported and called on its own.
 """
 import os
@@ -14,7 +14,7 @@ from psycopg.rows import dict_row
 # Ensures db_helpers resolves whether query_data.py is run directly or
 # imported as database.query_data from elsewhere in the package.
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from db_helpers import connect_db, disconnect_db, CONN_PARAMS
+from db_helpers import connect_db, disconnect_db
 
 
 def _format_q1(rows):
@@ -75,7 +75,7 @@ QUESTION_QUERY = [
         """
         SELECT COUNT(*) AS cnt_fall26
         FROM applicants
-        WHERE term = 'Fall 2026'
+        WHERE term ILIKE 'Fall 2026'
         """,
         _format_q1
     ),
@@ -86,13 +86,14 @@ QUESTION_QUERY = [
         SELECT
             ROUND(
                 SUM(
-                    CASE WHEN us_or_international = 'International' THEN 1
+                    CASE WHEN us_or_international ILIKE 'International' THEN 1
                     ELSE 0
                     END
-                ) * 100.0 / COUNT(us_or_international),
+                ) * 100.0 / COUNT(*),
             2) || '%' AS pct_intl
         FROM applicants
         WHERE us_or_international IS NOT NULL
+            AND us_or_international != ''
         """,
         _format_q2
     ),
@@ -131,8 +132,8 @@ QUESTION_QUERY = [
         SELECT ROUND(AVG(gpa)::numeric, 2) as avg_gpa_us_fall26
         FROM applicants
         WHERE gpa IS NOT NULL
-            AND us_or_international = 'American'
-            AND term = 'Fall 2026'
+            AND us_or_international ILIKE 'American'
+            AND term ILIKE 'Fall 2026'
         """,
         _format_q4
     ),
@@ -145,10 +146,10 @@ QUESTION_QUERY = [
                     CASE WHEN status ILIKE 'Accepted%' THEN 1
                     ELSE 0
                     END
-                ) * 100.0 / COUNT(status),
+                ) * 100.0 / COUNT(*),
             2) || '%' AS pct_accepted_fall25
         FROM applicants
-        WHERE term = 'Fall 2025'
+        WHERE term ILIKE 'Fall 2025'
         """,
         _format_q5
     ),
@@ -158,7 +159,7 @@ QUESTION_QUERY = [
         SELECT
             ROUND(AVG(gpa)::numeric, 2) avg_gpa_accepted_fall26
         FROM applicants
-        WHERE term = 'Fall 2026'
+        WHERE term ILIKE 'Fall 2026'
             AND gpa IS NOT NULL
             AND status ILIKE 'Accepted%'
         """,
@@ -185,7 +186,7 @@ QUESTION_QUERY = [
         """
         SELECT COUNT(*) AS cnt_fall26_cs_phd
         FROM applicants
-        WHERE term = 'Fall 2026'
+        WHERE term ILIKE 'Fall 2026'
             AND degree ILIKE 'PhD'
             AND status ILIKE 'Accepted%'
             AND program ILIKE 'Computer Science, %'
@@ -204,7 +205,7 @@ QUESTION_QUERY = [
         WITH q8 AS (
         SELECT COUNT(*) AS cnt
         FROM applicants
-        WHERE term = 'Fall 2026'
+        WHERE term ILIKE 'Fall 2026'
             AND degree ILIKE 'PhD'
             AND status ILIKE 'Accepted%'
             AND program ILIKE 'Computer Science, %'
@@ -217,7 +218,7 @@ QUESTION_QUERY = [
         q9 AS (
         SELECT COUNT(*) AS cnt
         FROM applicants
-        WHERE term = 'Fall 2026'
+        WHERE term ILIKE 'Fall 2026'
             AND degree ILIKE 'PhD'
             AND status ILIKE 'Accepted%'
             AND llm_generated_program ILIKE 'Computer Science'
@@ -288,19 +289,19 @@ QUESTION_QUERY = [
 ]
 
 
-def analyze(question_query: list[tuple[str, str, Callable[[list[dict]], str]]], credentials: tuple[str, str]):
+def analyze(question_query: list[tuple[str, str, Callable[[list[dict]], str]]], database_url: str):
     """
-    Takes a list of (question, query, format_result) tuples and a (user,
-    password) credentials tuple, runs each query, and prints its answer
-    using format_result. If a query fails, its error is printed in place
-    of an answer and the remaining questions are still attempted instead
-    of stopping the whole analysis.
+    Takes a list of (question, query, format_result) tuples and a
+    DATABASE_URL connection string, runs each query, and prints its
+    answer using format_result. If a query fails, its error is printed in
+    place of an answer and the remaining questions are still attempted
+    instead of stopping the whole analysis.
     Returns none.
     """
     if len(question_query) == 0:
         print("No questions or queries submitted")
         return
-    conn = connect_db(CONN_PARAMS, credentials)
+    conn = connect_db(database_url)
     if conn is None:
         return
     try:
@@ -317,21 +318,19 @@ def analyze(question_query: list[tuple[str, str, Callable[[list[dict]], str]]], 
         disconnect_db(conn)
 
 
-def _pg_credentials():
+def _database_url():
     """
-    Reads database credentials from the PGUSER/PGPASSWORD environment
-    variables.
-    Returns a (user, password) tuple.
-    Raises EnvironmentError if either variable isn't set.
+    Reads the DATABASE_URL environment variable.
+    Returns the connection string.
+    Raises EnvironmentError if it isn't set.
     """
-    user = os.getenv("PGUSER")
-    password = os.getenv("PGPASSWORD")
-    if not user or not password:
+    database_url = os.getenv("DATABASE_URL")
+    if not database_url:
         raise EnvironmentError(
-            "Set the PGUSER and PGPASSWORD environment variables before running this script."
+            "Set the DATABASE_URL environment variable before running this script."
         )
-    return user, password
+    return database_url
 
 
 if __name__ == "__main__":
-    analyze(QUESTION_QUERY, _pg_credentials())
+    analyze(QUESTION_QUERY, _database_url())

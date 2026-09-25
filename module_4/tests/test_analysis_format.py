@@ -185,13 +185,11 @@ def test_analysis_page_labels_every_result_answer(client, monkeypatch):
         lambda session: "International percentage: 50.00%",
         lambda session: "Percentage accepted: 33.33%",
     ]
-    monkeypatch.setenv("PGUSER", "test_user")
-    monkeypatch.setenv("PGPASSWORD", "test_password")
-    monkeypatch.setattr("app.routes.get_session", lambda credentials: _FakeSession([]))
+    monkeypatch.setattr("app.routes.get_session", lambda database_url: _FakeSession([]))
     monkeypatch.setattr("app.routes.QUESTION_QUERY", fake_questions)
     monkeypatch.setattr("app.routes.ALL_ORM_ANSWERS", fake_answers)
 
-    response = client.get("/")
+    response = client.get("/analysis")
 
     page = response.get_data(as_text=True)
     assert page.count("Answer:") == len(fake_questions)
@@ -204,12 +202,10 @@ def test_analysis_page_percentages_use_two_decimals(client, monkeypatch):
     two decimal places, end to end through the real template."""
     fake_questions = [("Percentage question?", None, None)]
     fake_answers = [lambda session: "International percentage: 50.00%"]
-    monkeypatch.setenv("PGUSER", "test_user")
-    monkeypatch.setenv("PGPASSWORD", "test_password")
-    monkeypatch.setattr("app.routes.get_session", lambda credentials: _FakeSession([]))
+    monkeypatch.setattr("app.routes.get_session", lambda database_url: _FakeSession([]))
     monkeypatch.setattr("app.routes.QUESTION_QUERY", fake_questions)
     monkeypatch.setattr("app.routes.ALL_ORM_ANSWERS", fake_answers)
 
-    response = client.get("/")
+    response = client.get("/analysis")
 
     _assert_all_two_decimal_percentages(response.get_data(as_text=True))

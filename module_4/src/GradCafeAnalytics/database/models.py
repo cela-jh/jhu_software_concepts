@@ -3,17 +3,11 @@
 SQLAlchemy model for the applicants table, plus the engine and session
 used to connect to the same PostgreSQL database as load_data.py.
 """
-import sys
 from datetime import date
-from pathlib import Path
 
-from sqlalchemy import URL, Date, Float, Text, create_engine
+from sqlalchemy import Date, Float, Text, create_engine
+from sqlalchemy.engine import make_url
 from sqlalchemy.orm import DeclarativeBase, Mapped, Session, mapped_column
-
-# Ensures db_helpers resolves whether models.py is run directly or imported
-# as database.models from elsewhere in the package.
-sys.path.insert(0, str(Path(__file__).resolve().parent))
-from db_helpers import CONN_PARAMS
 
 
 class Base(DeclarativeBase):
@@ -40,29 +34,23 @@ class Applicant(Base):
     llm_generated_university: Mapped[str | None] = mapped_column(Text)
 
 
-def get_engine(credentials: tuple[str, str]):
+def get_engine(database_url: str):
     """
     Builds a SQLAlchemy engine for the same PostgreSQL database used by
-    load_data.py, from a (user, password) credentials tuple and the
-    connection details in db_helpers.CONN_PARAMS.
+    load_data.py, from a "postgresql://user:password@host:port/dbname"
+    connection string (the psycopg driver is selected explicitly, since
+    plain "postgresql://" would otherwise resolve to SQLAlchemy's default
+    driver rather than the one this project installs).
     Returns the engine.
     """
-    user, password = credentials
-    url = URL.create(
-        "postgresql+psycopg",
-        username=user,
-        password=password,
-        host=CONN_PARAMS["host"],
-        port=CONN_PARAMS["port"],
-        database=CONN_PARAMS["dbname"],
-    )
+    url = make_url(database_url).set(drivername="postgresql+psycopg")
     return create_engine(url)
 
 
-def get_session(credentials: tuple[str, str]) -> Session:
+def get_session(database_url: str) -> Session:
     """
     Opens a new SQLAlchemy Session bound to an engine for the same
     PostgreSQL database used by load_data.py.
     Returns the session. The caller is responsible for closing it.
     """
-    return Session(get_engine(credentials))
+    return Session(get_engine(database_url))

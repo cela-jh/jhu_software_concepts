@@ -7,12 +7,6 @@ import re
 import psycopg
 from psycopg.rows import dict_row
 
-CONN_PARAMS = {
-    "dbname": os.getenv("PGDATABASE", "cam_db"),
-    "host": "localhost",
-    "port": 5432
-}
-
 
 SQL_CLAUSE_KEYWORDS = [
     "SELECT DISTINCT",
@@ -48,23 +42,18 @@ _SQL_KEYWORD_PATTERN = re.compile(
 )
 
 
-def connect_db(conn_params: dict, credentials: tuple[str, str]):
+def connect_db(database_url: str):
     """
-    Connects to the PostgreSQL database described by conn_params.
+    Connects to the PostgreSQL database described by database_url (a
+    "postgresql://user:password@host:port/dbname" connection string).
     Returns the open connection, or None if the connection failed.
     """
-    user, password = credentials
     try:
-        return psycopg.connect(
-            dbname=conn_params["dbname"],
-            user=user,
-            password=password,
-            host=conn_params["host"],
-            port=conn_params["port"]
-        )
+        return psycopg.connect(database_url)
     except psycopg.DatabaseError as error:
-        print(f"Could not connect to the database. Check the database name, "
-              f"host, port, username, and password and try again. Details: {error}")
+        print(f"Could not connect to the database. Check DATABASE_URL "
+              f"(database name, host, port, username, and password) and "
+              f"try again. Details: {error}")
         return None
 
 

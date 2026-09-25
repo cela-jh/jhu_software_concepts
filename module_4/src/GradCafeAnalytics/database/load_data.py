@@ -16,7 +16,7 @@ import psycopg
 # Ensures db_helpers resolves whether load_data.py is run directly or
 # imported as database.load_data from elsewhere in the package.
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from db_helpers import connect_db, disconnect_db, CONN_PARAMS
+from db_helpers import connect_db, disconnect_db
 
 # paths.py is a sibling of database/, directly under GradCafeAnalytics/.
 # Imported unconditionally (not just under `if __name__`) since
@@ -289,7 +289,7 @@ def _normalize_existing_nationality(cursor):
               f"that weren't 'American' or 'International'.")
 
 
-def load_data(filepath, credentials: tuple[str, str]):
+def load_data(filepath, database_url: str):
     """
     Loads applicant results from a JSON file into the applicants table.
     Results missing required fields are skipped and reported. A result
@@ -302,20 +302,24 @@ def load_data(filepath, credentials: tuple[str, str]):
     and any us_or_international value that isn't 'American' or
     'International' is normalized to 'Other', in this file and in the
     table already.
-    Returns none.
+    Returns True if the file was read and the database reached (even if
+    some individual results were skipped as invalid), or False if the
+    file couldn't be read or the database couldn't be reached at all -
+    callers (the CLI entry point, the Pull Data upload step) use this to
+    tell an unsuccessful load apart from a completed one.
     """
     try:
         with open(filepath, "r") as f:
             results = json.load(f)
     except FileNotFoundError:
         print(f"Could not find the file '{filepath}'. Check the path and try again.")
-        return
+        return False
     except json.JSONDecodeError as error:
         print(f"'{filepath}' is not valid JSON: {error}")
-        return
-    conn = connect_db(CONN_PARAMS, credentials)
+        return False
+    conn = connect_db(database_url)
     if conn is None:
-        return
+        return False
 
     valid_rows = []
     failed_ids = []
@@ -350,6 +354,8 @@ def load_data(filepath, credentials: tuple[str, str]):
     print(f"Loaded {loaded} new results. Updated {updated} existing results with "
           f"new field values. Skipped {skipped_invalid} with missing or invalid fields.")
 
+    return True
+
 
 def parse_args():
     """
@@ -373,10 +379,10 @@ if __name__ == "__main__":
     cli_args = parse_args()
     validate_filepath(cli_args.relative_filepath, must_exist=True)
 
-    pg_user = os.getenv("PGUSER")
-    pg_password = os.getenv("PGPASSWORD")
-    if not pg_user or not pg_password:
-        print("Set the PGUSER and PGPASSWORD environment variables before running load_data.py.")
+    database_url = os.getenv("DATABASE_URL")
+    if not database_url:
+        print("Set the DATABASE_URL environment variable before running load_data.py.")
         sys.exit(1)
 
-    load_data(cli_args.relative_filepath, (pg_user, pg_password))
+    if not load_data(cli_args.relative_filepath, database_url):
+        sys.exit(1)

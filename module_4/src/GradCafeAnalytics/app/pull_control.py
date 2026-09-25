@@ -61,7 +61,7 @@ def recent_lines():
         return list(_lines)
 
 
-def start(chrome_binary, credentials):
+def start(chrome_binary, database_url):
     """
     Starts the pull subprocess if one isn't already running, then a
     background thread that streams its output into recent_lines() and
@@ -80,7 +80,7 @@ def start(chrome_binary, credentials):
             stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True,
         )
         _thread = threading.Thread(
-            target=_stream_and_upload, args=(_process, credentials), daemon=True
+            target=_stream_and_upload, args=(_process, database_url), daemon=True
         )
         _thread.start()
     return True
@@ -104,25 +104,39 @@ def cancel():
         return "finishing"
 
 
-def _stream_and_upload(process, credentials):
+def _stream_and_upload(process, database_url):
     """
     Reads the subprocess's output line by line into recent_lines() as it
     runs, then loads whatever it collected into PostgreSQL once it exits,
     also capturing that step's own printed summary into recent_lines().
+    Whatever was collected is still uploaded even if the scraper exited
+    with an error, but the final status line reflects that instead of
+    unconditionally announcing success.
     """
     for line in process.stdout:
         with _lock:
             _lines.append(line.rstrip())
-    process.wait()
+    exit_code = process.wait()
 
     with _lock:
-        _lines.append("Scraping finished. Uploading new results to the database...")
+        if exit_code != 0:
+            _lines.append(
+                f"Scraper exited with an error (code {exit_code}). "
+                f"Uploading whatever was collected before it stopped..."
+            )
+        else:
+            _lines.append("Scraping finished. Uploading new results to the database...")
 
     buffer = io.StringIO()
     with contextlib.redirect_stdout(buffer):
-        load_data(DATA_FILE, credentials)
+        load_succeeded = load_data(DATA_FILE, database_url)
 
     with _lock:
         for line in buffer.getvalue().splitlines():
             _lines.append(line)
-        _lines.append("Pull complete.")
+        if exit_code != 0:
+            _lines.append(f"Pull finished with errors (scraper exit code {exit_code}).")
+        elif not load_succeeded:
+            _lines.append("Pull finished with errors: the database upload failed.")
+        else:
+            _lines.append("Pull complete.")

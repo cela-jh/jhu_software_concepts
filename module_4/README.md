@@ -79,12 +79,11 @@ module_4/
    - macOS: `/Applications/Google Chrome.app/Contents/MacOS/Google Chrome`
    - Windows: `C:\Program Files\Google\Chrome\Application\chrome.exe`
    - Linux: usually `google-chrome` on PATH
-5. Set PostgreSQL credentials as environment variables (needed for `load_data.py`, `app.py`, `query_data.py`, `orm_queries.py`):
+5. Set `DATABASE_URL` (needed for `load_data.py`, `app.py`, `query_data.py`, `orm_queries.py`) to a `postgresql://user:password@host:port/dbname` connection string:
    ```
-   export PGUSER=your_postgres_user
-   export PGPASSWORD=your_postgres_password
-   export PGDATABASE=your_db        # (defaults to `cam_db`)
+   export DATABASE_URL=postgresql://your_postgres_user:your_postgres_password@localhost:5432/cam_db
    ```
+   On a locally trust-authed PostgreSQL install (no password needed), the password segment can be omitted entirely: `postgresql://your_postgres_user@localhost:5432/cam_db`.
 6. `app.py`'s Pull Data button also needs `CHROME_BINARY` set to the path from step 4.
 
 ## 3. CLI Usage
@@ -99,25 +98,26 @@ python src/GradCafeAnalytics/scraping/scrape.py --num_results <N> --chrome_binar
 
 **Loading into PostgreSQL:**
 ```
-PGUSER=youruser PGPASSWORD=yourpassword PGDATABASE=yourdb python src/GradCafeAnalytics/database/load_data.py <file.json>
+DATABASE_URL=postgresql://youruser:yourpassword@localhost:5432/yourdb python src/GradCafeAnalytics/database/load_data.py <file.json>
 ```
-Validates every result, skips and reports any missing required fields, and upserts the rest (see [section 6](#6-loading-into-postgresql) for details). Prints a summary of loaded/updated/skipped counts at the end.
+Validates every result, skips and reports any missing required fields, and upserts the rest (see [section 6](#6-loading-into-postgresql) for details). Prints a summary of loaded/updated/skipped counts at the end, and exits with a non-zero status if the file couldn't be read or the database couldn't be reached at all, so a calling script or CI step can tell an unsuccessful load apart from a completed one.
 
-**Running the Part 2 SQL analysis:** `PGUSER=youruser PGPASSWORD=yourpassword PGDATABASE=yourdb python src/GradCafeAnalytics/database/query_data.py`
+**Running the Part 2 SQL analysis:** `DATABASE_URL=postgresql://youruser:yourpassword@localhost:5432/yourdb python src/GradCafeAnalytics/database/query_data.py`
 
-**Running the Part 6 SQLAlchemy ORM analysis:** `PGUSER=youruser PGPASSWORD=yourpassword PGDATABASE=yourdb python src/GradCafeAnalytics/database/orm_queries.py`
+**Running the Part 6 SQLAlchemy ORM analysis:** `DATABASE_URL=postgresql://youruser:yourpassword@localhost:5432/yourdb python src/GradCafeAnalytics/database/orm_queries.py`
 
 **Running the analysis webpage:**
 ```
-PGUSER=youruser PGPASSWORD=yourpassword PGDATABASE=yourdb CHROME_BINARY="<path to Chrome>" python src/GradCafeAnalytics/app.py [--file path/to/results.json]
+DATABASE_URL=postgresql://youruser:yourpassword@localhost:5432/yourdb CHROME_BINARY="<path to Chrome>" python src/GradCafeAnalytics/app.py [--file path/to/results.json]
 ```
-Open http://127.0.0.1:5000/. Every answer is read live from PostgreSQL through the `Applicant` model on each page load. `CHROME_BINARY` is only needed for Pull Data. `--file` is optional and defaults to `data/applicant_data.json`; when set, both Pull Data (what it writes to and loads from) and Update Analysis (what it re-syncs) use that file instead - for example, pointing at `data/llm_extend_applicant_data.json` to keep the LLM-standardized fields flowing through Update Analysis.
+Open http://127.0.0.1:5000/analysis. Every answer is read live from PostgreSQL through the `Applicant` model on each page load; if PostgreSQL itself is unreachable, the page shows a plain "database is currently unavailable" message (HTTP 503) rather than crashing. `CHROME_BINARY` is only needed for Pull Data. `--file` is optional and defaults to `data/applicant_data.json`; when set, both Pull Data (what it writes to and loads from) and Update Analysis (what it re-syncs) use that file instead - for example, pointing at `data/llm_extend_applicant_data.json` to keep the LLM-standardized fields flowing through Update Analysis.
 
 ### Pull Data and Update Analysis
 
 - Pull Data starts `scrape.py` in the background, scraping from page 1 until it finds `--pull_seen_limit` consecutive already-known results, or until Cancel is clicked, then loads whatever it collected into PostgreSQL. The button becomes Cancel while running, and the page polls and shows the last five status lines.
 - Only one pull runs at a time; clicking Pull Data while one is active (even from another tab, or after a reload) reports it's already in progress instead of starting a second.
 - Cancel stops the pull cleanly; whatever was already collected is still loaded into PostgreSQL afterward.
+- If the scraper subprocess itself exits with an error partway through, whatever it collected before stopping is still uploaded, but the final status line reports the failure instead of announcing "Pull complete" unconditionally.
 - A Cloudflare challenge during a pull shows up in the status lines; solve it in Chrome's visible window and the pull continues on its own once cleared.
 - Update Analysis re-runs the analysis and reloads the page. It never starts a scrape; if a pull is running, it reports that new data is being retrieved and leaves the page as is.
 - Reloading the page while a pull is running shows Cancel and the current status lines immediately.
@@ -154,32 +154,32 @@ Every function listed is public (no leading underscore).
 - `save_state(state, filepath)` / `load_state(filepath)` - Persist and read the pagination sidecar file so an interrupted scrape resumes instead of restarting.
 
 ### `database/db_helpers.py`
-- `connect_db(conn_params, credentials)` - Opens a PostgreSQL connection, printing a clear message and returning `None` instead of raising if it fails.
+- `connect_db(database_url)` - Opens a PostgreSQL connection from a `postgresql://user:password@host:port/dbname` connection string, printing a clear message and returning `None` instead of raising if it fails.
 - `disconnect_db(conn)` - Closes a connection opened by `connect_db`.
 - `pretty_print_query(query)` - Reformats a SQL string so each clause starts its own line in uppercase. Standalone utility; not currently called by `query_data.py`.
 
 ### `database/load_data.py`
-- `load_data(filepath, credentials)` - Reads a JSON file and loads it into PostgreSQL: skips and collects ids for results missing a required field, converts/validates dates and GPA/GRE values, upserts valid results in batches, and prints a load/update/skip summary. See [section 6](#6-loading-into-postgresql) for the full logic.
-- `parse_args()` - Optional positional filepath (default `paths.DEFAULT_DATA_FILE`). Reads `PGUSER`/`PGPASSWORD` from the environment when run directly, exiting with a message if either is unset.
+- `load_data(filepath, database_url)` - Reads a JSON file and loads it into PostgreSQL: skips and collects ids for results missing a required field, converts/validates dates and GPA/GRE values, upserts valid results in batches, and prints a load/update/skip summary. Returns `True` if the file was read and the database was reached, `False` otherwise (used by the CLI entry point to exit non-zero on failure rather than always exiting 0). See [section 6](#6-loading-into-postgresql) for the full logic.
+- `parse_args()` - Optional positional filepath (default `paths.DEFAULT_DATA_FILE`). Reads `DATABASE_URL` from the environment when run directly, exiting with a message (and non-zero status) if it's unset or the load itself fails.
 
 ### `database/query_data.py`
 Holds `QUESTION_QUERY`, the list of (question, SQL, format_result) tuples for the Part 2 analysis.
-- `analyze(question_query, credentials)` - Runs each query and prints its formatted answer; a failing query prints its error in place without stopping the rest.
-- `_pg_credentials()` - Reads `PGUSER`/`PGPASSWORD` from the environment, raising `EnvironmentError` if either is unset.
+- `analyze(question_query, database_url)` - Runs each query and prints its formatted answer; a failing query prints its error in place without stopping the rest.
+- `_database_url()` - Reads `DATABASE_URL` from the environment, raising `EnvironmentError` if it's unset.
 
 ### `database/models.py`
 - `Applicant` - SQLAlchemy model mapping the same `applicants` table `load_data.py` writes to (`p_id` as primary key). No separate table or copy of data is created.
-- `get_engine(credentials)` / `get_session(credentials)` - Build a SQLAlchemy engine/session using the same (user, password) credentials convention used elsewhere.
+- `get_engine(database_url)` / `get_session(database_url)` - Build a SQLAlchemy engine/session from a `DATABASE_URL`-style connection string, selecting the `psycopg` driver explicitly.
 
 ### `database/orm_queries.py`
-- `orm_q1` through `orm_q9`, `orm_a1`, `orm_a2` - Repeat the matching Part 2 question with SQLAlchemy's `select()`/`where()`/`func()`/`and_()`/`or_()`, returning the same formatted answer as `query_data.py`. `ALL_ORM_ANSWERS` lists all eleven for `app.py`; `ORM_QUESTIONS` lists Q1, Q4, Q5, Q8, Q9, and A1 for `run_orm_queries()`.
-- `run_orm_queries(credentials)` / `_pg_credentials()` - Same pattern as `query_data.py`.
+- `orm_q1` through `orm_q9`, `orm_a1`, `orm_a2` - Repeat the matching Part 2 question with SQLAlchemy's `select()`/`where()`/`func()`/`and_()`/`or_()`, returning the same formatted answer as `query_data.py`. Term/status/nationality comparisons use case-insensitive `ilike()` rather than `==`, so a mixed-case value (e.g. "fall 2026") still matches; percentage denominators are computed independently of whatever column the numerator's `CASE` expression checks, so a blank or unusual value in that column doesn't silently drop a row from the total. `ALL_ORM_ANSWERS` lists all eleven for `app.py`; `ORM_QUESTIONS` lists Q1, Q4, Q5, Q8, Q9, and A1 for `run_orm_queries()`.
+- `run_orm_queries(database_url)` / `_database_url()` - Same pattern as `query_data.py`.
 
 `app.py` imports and runs the Flask app from `app/`, calling `pull_control.kill_stale_chrome()` on startup and shutdown so an orphaned Chrome process never blocks the next Pull Data click.
 
 ### `app/routes.py`
-- `analysis()` - Route for `/`. Runs every `orm_queries.ALL_ORM_ANSWERS` function against a fresh SQLAlchemy session, pairs each with its question text, and renders `analysis.html` with the Pull Data button's current state. Returns a plain error message if `PGUSER`/`PGPASSWORD` are unset.
-- `pull_start()` / `pull_cancel()` / `pull_status()` - Routes behind the Pull Data button, handing off to `pull_control` and returning JSON status.
+- `analysis()` - Route for `/analysis`. Runs every `orm_queries.ALL_ORM_ANSWERS` function against a fresh SQLAlchemy session, pairs each with its question text, and renders `analysis.html` with the Pull Data button's current state. Returns a plain error message if `DATABASE_URL` is unset (500), or a plain "database unavailable" message if PostgreSQL can't actually be reached (503), rather than an unhandled crash either way.
+- `pull_start()` / `pull_cancel()` / `pull_status()` - Routes behind the Pull Data button (`POST /pull-data`, `POST /pull/cancel`, `GET /pull/status`), handing off to `pull_control` and returning JSON status. `pull_start()` and `update_analysis()` both include `ok`/`busy` boolean keys in their JSON responses alongside the existing `status`/`message` fields.
 
 ### `app/pull_control.py`
 Tracks the single background pull `app.py` may have running, guarded by a lock.
@@ -218,7 +218,7 @@ CREATE TABLE IF NOT EXISTS applicants (
 
 ### Credentials
 
-PostgreSQL credentials are never hardcoded and are always passed as a (user, password) tuple. `load_data.py`, `app.py`, `query_data.py`, and `orm_queries.py` all read them from `PGUSER`/`PGPASSWORD` at runtime rather than a CLI flag, since a flag's value is visible to other users (via `ps`) and saved in shell history. `CONN_PARAMS` (dbname/host/port) isn't a secret; `host`/`port` stay plain constants in `db_helpers.py`, while `dbname` reads from the optional `PGDATABASE` environment variable (defaulting to `cam_db`) so the test suite can point at a disposable `cam_db_test` database instead without touching this file.
+PostgreSQL credentials are never hardcoded and are always passed as a single `DATABASE_URL` connection string (`postgresql://user:password@host:port/dbname`). `load_data.py`, `app.py`, `query_data.py`, and `orm_queries.py` all read it from the environment at runtime rather than a CLI flag, since a flag's value is visible to other users (via `ps`) and saved in shell history. This also means tests can point the whole application at a different database (`cam_db_test`, in this project's own test suite) just by setting `DATABASE_URL` differently, with no other configuration to override.
 
 ### Validation and missing values
 
@@ -324,8 +324,8 @@ GradCafe's robots.txt was reviewed manually before writing any scraping code and
 ### Setup
 
 1. Create and activate `module_4/venv`, then `pip install -r requirements.txt` (already covers `pytest`, `pytest-cov`, `pytest-randomly`, and every runtime dependency, including `llm_hosting`'s).
-2. Create a disposable `cam_db_test` PostgreSQL database with the same schema as `cam_db` (see [section 6](#6-loading-into-postgresql)) - the test suite never touches `cam_db`'s real data. `database/db_helpers.py`'s `CONN_PARAMS["dbname"]` reads the `PGDATABASE` environment variable; `tests/conftest.py` sets it to `cam_db_test` before anything else imports `database.db_helpers`, so this happens automatically for every test run.
-3. Local trust-authed PostgreSQL doesn't check the password's contents, only that `PGUSER`/`PGPASSWORD` are both non-empty (some code paths treat an empty string the same as unset) - any non-empty value works for `PGPASSWORD` when testing locally.
+2. Create a disposable `cam_db_test` PostgreSQL database with the same schema as `cam_db` (see [section 6](#6-loading-into-postgresql)) - the test suite never touches `cam_db`'s real data. `tests/conftest.py` builds a `DATABASE_URL` pointing at `cam_db_test` from the current OS user (`postgresql://<user>@localhost:5432/cam_db_test`, via `getpass.getuser()` rather than a hardcoded name, so this works on whatever machine the suite runs on) and sets it as the `DATABASE_URL` environment variable for the whole test session.
+3. Local trust-authed PostgreSQL doesn't check the password's contents at all, which is why the test `DATABASE_URL` omits one entirely.
 
 ### Running the suite
 
@@ -352,3 +352,4 @@ Every test is marked with exactly one of `web`, `buttons`, `analysis`, `db`, or 
 - `llm_hosting/app.py` and `llm_hosting/llm_helper.py` are loaded via `importlib` under names other than `app` (e.g. `llm_app`), since a bare `import app` would resolve to the already-imported Flask `app` package from `src/GradCafeAnalytics/app/` instead (whichever module claims the name `app` in `sys.modules` first wins, for the rest of the process). `llm_helper.run_parallel()`'s own lazy `from app import _get_model_path` is satisfied in tests by temporarily inserting a fake module into `sys.modules["app"]`.
 - Database tests use a real local PostgreSQL connection (`cam_db_test`), not a mocked one, so schema/constraint behavior (`NOT NULL`, `UNIQUE`, upsert-on-conflict) is verified for real rather than assumed.
 - Selenium, subprocess, and `urllib` calls in `scraping/scrape.py` are mocked at the point of use in every test; no test here ever launches a real Chrome instance or makes a real HTTP request.
+- The Pull Data and Update Analysis buttons carry `data-testid="pull-data-btn"` / `data-testid="update-analysis-btn"` attributes (alongside the `id` attributes the page's own JS uses), so UI tests have a stable selector that doesn't break if the visible button text or styling changes.

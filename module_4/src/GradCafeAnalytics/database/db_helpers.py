@@ -2,11 +2,13 @@
 `db_helpers.py`
 Reusable functions for connecting to and disconnecting from PostgreSQL.
 """
-import psycopg
+import os
 import re
+import psycopg
+from psycopg.rows import dict_row
 
 CONN_PARAMS = {
-    "dbname": "cam_db",
+    "dbname": os.getenv("PGDATABASE", "cam_db"),
     "host": "localhost",
     "port": 5432
 }
@@ -73,6 +75,16 @@ def disconnect_db(conn):
     """
     if conn is not None:
         conn.close()
+
+
+def get_applicant(conn, p_id):
+    """
+    Queries a single row from the applicants table by its primary key.
+    Returns a dict keyed by column name, or None if no row has that p_id.
+    """
+    with conn.cursor(row_factory=dict_row) as cursor:
+        cursor.execute("SELECT * FROM applicants WHERE p_id = %s", (p_id,))
+        return cursor.fetchone()
 
 
 def pretty_print_query(query):

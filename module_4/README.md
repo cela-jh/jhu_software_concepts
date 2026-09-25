@@ -82,6 +82,7 @@ module_4/
    ```
    export PGUSER=your_postgres_user
    export PGPASSWORD=your_postgres_password
+   export PGDATABASE=your_db        # (defaults to `cam_db`)
    ```
 6. `app.py`'s Pull Data button also needs `CHROME_BINARY` set to the path from step 4.
 
@@ -97,17 +98,17 @@ python src/GradCafeAnalytics/scraping/scrape.py --num_results <N> --chrome_binar
 
 **Loading into PostgreSQL:**
 ```
-PGUSER=youruser PGPASSWORD=yourpassword python src/GradCafeAnalytics/database/load_data.py <file.json>
+PGUSER=youruser PGPASSWORD=yourpassword PGDATABASE=yourdb python src/GradCafeAnalytics/database/load_data.py <file.json>
 ```
 Validates every result, skips and reports any missing required fields, and upserts the rest (see [section 6](#6-loading-into-postgresql) for details). Prints a summary of loaded/updated/skipped counts at the end.
 
-**Running the Part 2 SQL analysis:** `PGUSER=youruser PGPASSWORD=yourpassword python src/GradCafeAnalytics/database/query_data.py`
+**Running the Part 2 SQL analysis:** `PGUSER=youruser PGPASSWORD=yourpassword PGDATABASE=yourdb python src/GradCafeAnalytics/database/query_data.py`
 
-**Running the Part 6 SQLAlchemy ORM analysis:** `PGUSER=youruser PGPASSWORD=yourpassword python src/GradCafeAnalytics/database/orm_queries.py`
+**Running the Part 6 SQLAlchemy ORM analysis:** `PGUSER=youruser PGPASSWORD=yourpassword PGDATABASE=yourdb python src/GradCafeAnalytics/database/orm_queries.py`
 
 **Running the analysis webpage:**
 ```
-PGUSER=youruser PGPASSWORD=yourpassword CHROME_BINARY="<path to Chrome>" python src/GradCafeAnalytics/app.py
+PGUSER=youruser PGPASSWORD=yourpassword PGDATABASE=yourdb CHROME_BINARY="<path to Chrome>" python src/GradCafeAnalytics/app.py
 ```
 Open http://127.0.0.1:5000/. Every answer is read live from PostgreSQL through the `Applicant` model on each page load. `CHROME_BINARY` is only needed for Pull Data.
 
@@ -216,7 +217,7 @@ CREATE TABLE IF NOT EXISTS applicants (
 
 ### Credentials
 
-PostgreSQL credentials are never hardcoded and are always passed as a (user, password) tuple. `load_data.py`, `app.py`, `query_data.py`, and `orm_queries.py` all read them from `PGUSER`/`PGPASSWORD` at runtime rather than a CLI flag, since a flag's value is visible to other users (via `ps`) and saved in shell history. `CONN_PARAMS` (dbname/host/port) isn't a secret and stays a plain constant in `db_helpers.py`.
+PostgreSQL credentials are never hardcoded and are always passed as a (user, password) tuple. `load_data.py`, `app.py`, `query_data.py`, and `orm_queries.py` all read them from `PGUSER`/`PGPASSWORD` at runtime rather than a CLI flag, since a flag's value is visible to other users (via `ps`) and saved in shell history. `CONN_PARAMS` (dbname/host/port) isn't a secret; `host`/`port` stay plain constants in `db_helpers.py`, while `dbname` reads from the optional `PGDATABASE` environment variable (defaulting to `cam_db`) so the test suite can point at a disposable `cam_db_test` database instead without touching this file.
 
 ### Validation and missing values
 

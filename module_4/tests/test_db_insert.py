@@ -5,44 +5,11 @@ database, never cam_db): that a pull inserts rows with every required
 field populated, that re-pulling the same data doesn't create
 duplicates, and that a simple query function returns the expected keys.
 """
-import json
-
 import pytest
 
 from app import pull_control
 from database.db_helpers import get_applicant
-
-
-class _FakeProcess:
-    """Stands in for the subprocess.Popen scrape.py process. The faked
-    scraper has already written its results to DATA_FILE before this
-    "process" is created, so stdout just needs to end cleanly."""
-
-    def __init__(self, lines=()):
-        self.stdout = iter(lines)
-
-    def wait(self):
-        return 0
-
-
-def _write_fake_scraped_data(path, rows):
-    path.write_text(json.dumps(rows, indent=2))
-
-
-def _fake_row(result_id, **overrides):
-    """A minimally valid scraped result; _extract_result_id() pulls
-    result_id back out of the url as the row's p_id."""
-    row = {
-        "program": "Computer Science, Test University",
-        "date added": "Added on Sep 12, 2026",
-        "url": f"https://www.thegradcafe.com/result/{result_id}",
-        "status": "Accepted",
-        "term": "Fall 2026",
-        "US/International": "American",
-        "degree": "Masters",
-    }
-    row.update(overrides)
-    return row
+from helpers import FakeProcess, fake_applicant_row, write_fake_scraped_data
 
 
 @pytest.mark.db
@@ -55,10 +22,10 @@ def test_pull_inserts_rows_with_required_fields(client, monkeypatch, tmp_path, d
         assert cursor.fetchone()[0] == 0
 
     data_file = tmp_path / "applicant_data.json"
-    _write_fake_scraped_data(data_file, [_fake_row(1000001), _fake_row(1000002)])
+    write_fake_scraped_data(data_file, [fake_applicant_row(1000001), fake_applicant_row(1000002)])
 
     monkeypatch.setattr(pull_control, "DATA_FILE", data_file)
-    monkeypatch.setattr("app.pull_control.subprocess.Popen", lambda *a, **kw: _FakeProcess())
+    monkeypatch.setattr("app.pull_control.subprocess.Popen", lambda *a, **kw: FakeProcess())
     monkeypatch.setenv("CHROME_BINARY", "/fake/chrome")
     monkeypatch.setenv("PGUSER", "cameronela")
     monkeypatch.setenv("PGPASSWORD", "test_password")
@@ -85,10 +52,10 @@ def test_repeated_pull_does_not_duplicate_rows(client, monkeypatch, tmp_path, db
     """Pulling the same result twice (e.g. an overlapping re-scrape)
     must upsert, not duplicate, since url is UNIQUE."""
     data_file = tmp_path / "applicant_data.json"
-    _write_fake_scraped_data(data_file, [_fake_row(2000001)])
+    write_fake_scraped_data(data_file, [fake_applicant_row(2000001)])
 
     monkeypatch.setattr(pull_control, "DATA_FILE", data_file)
-    monkeypatch.setattr("app.pull_control.subprocess.Popen", lambda *a, **kw: _FakeProcess())
+    monkeypatch.setattr("app.pull_control.subprocess.Popen", lambda *a, **kw: FakeProcess())
     monkeypatch.setenv("CHROME_BINARY", "/fake/chrome")
     monkeypatch.setenv("PGUSER", "cameronela")
     monkeypatch.setenv("PGPASSWORD", "test_password")

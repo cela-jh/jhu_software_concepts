@@ -11,18 +11,10 @@ from types import SimpleNamespace
 
 import pytest
 
-from database.orm_queries import _format_percentage, orm_a1, orm_q2, orm_q5
-
-PERCENTAGE_PATTERN = re.compile(r"\d+(?:\.\d+)?%")
-
-
-def _assert_all_two_decimal_percentages(text):
-    """Every percentage-looking token in text must be digits, a
-    decimal point with exactly two digits, then '%'."""
-    matches = PERCENTAGE_PATTERN.findall(text)
-    assert matches, f"expected at least one percentage in {text!r}"
-    for token in matches:
-        assert re.fullmatch(r"\d+\.\d{2}%", token), f"badly formatted percentage: {token!r}"
+from database.orm_queries import (
+    _format_percentage, _or_na, orm_a1, orm_a2, orm_q2, orm_q3, orm_q5,
+)
+from helpers import assert_all_two_decimal_percentages as _assert_all_two_decimal_percentages
 
 
 class _FakeResult:
@@ -87,6 +79,76 @@ def test_orm_q5_percentage_uses_two_decimals():
 
     assert result == "Percentage accepted: 33.33%"
     _assert_all_two_decimal_percentages(result)
+
+
+@pytest.mark.analysis
+@pytest.mark.parametrize("value,expected", [(None, "N/A"), (3.5, 3.5), (0, 0)])
+def test_or_na_reports_na_only_for_none(value, expected):
+    """_or_na must distinguish "no data" (None) from a real value of
+    zero or otherwise falsy - only None should become "N/A"."""
+    assert _or_na(value) == expected
+
+
+@pytest.mark.analysis
+def test_format_percentage_returns_na_for_no_data():
+    """A percentage computed over zero matching rows arrives as SQL
+    NULL / Python None; formatting it must report "N/A", not crash on
+    float(None)."""
+    assert _format_percentage(None) == "N/A"
+
+
+@pytest.mark.analysis
+def test_orm_q5_reports_na_when_no_matching_rows():
+    """No Fall 2025 entries at all means SUM()/COUNT() over zero rows,
+    which SQL returns as NULL - orm_q5 must report "N/A" instead of
+    raising when it tries to format that percentage."""
+    session = _FakeSession([_FakeResult(scalar=None)])
+
+    result = orm_q5(session)
+
+    assert result == "Percentage accepted: N/A"
+
+
+@pytest.mark.analysis
+def test_orm_q3_reports_na_when_no_matching_rows():
+    """AVG() over zero matching rows is NULL for each of GPA/GRE/GRE
+    V/GRE AW independently; orm_q3 must report "N/A" for each rather
+    than the literal text "None"."""
+    session = _FakeSession([
+        _FakeResult(scalar=None), _FakeResult(scalar=None),
+        _FakeResult(scalar=None), _FakeResult(scalar=None),
+    ])
+
+    result = orm_q3(session)
+
+    assert result == ("Average GPA: N/A, Average GRE: N/A, "
+                       "Average GRE V: N/A, Average GRE AW: N/A")
+
+
+@pytest.mark.analysis
+def test_orm_a2_reports_na_without_crashing_when_no_usc_data():
+    """With zero USC applicants on either side of the accepted/not
+    comparison, both averages are None; orm_a2 must report "N/A" for
+    each and for the difference, not raise on None - None."""
+    session = _FakeSession([_FakeResult(scalar=None), _FakeResult(scalar=None)])
+
+    result = orm_a2(session)
+
+    assert result == ("USC average GPA accepted: N/A, "
+                       "USC average GPA not accepted: N/A, "
+                       "Difference: N/A")
+
+
+@pytest.mark.analysis
+def test_orm_a1_reports_message_when_no_accepted_applicants():
+    """With zero accepted applicants at all, there are no terms to list
+    a percentage for; orm_a1 must say so rather than return an empty
+    string."""
+    session = _FakeSession([_FakeResult(scalar=0), _FakeResult(rows=[])])
+
+    result = orm_a1(session)
+
+    assert result == "No accepted applicants found"
 
 
 @pytest.mark.analysis

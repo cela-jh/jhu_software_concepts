@@ -29,12 +29,23 @@ def _round2(expr):
     return func.round(cast(expr, Numeric), 2)
 
 
+def _or_na(value):
+    """Renders a possibly-missing value (e.g. an AVG() over zero
+    matching rows, which SQL returns as NULL) as "N/A" instead of the
+    literal text "None"."""
+    return value if value is not None else "N/A"
+
+
 def _format_percentage(value):
     """
     Formats a percentage value with exactly two decimal places (e.g.
     50 becomes "50.00%", not "50.0%" or "50%"), regardless of whether it
     arrived as a Decimal from SQL-side rounding or a plain Python float.
+    Returns "N/A" instead of raising if there were no matching rows to
+    compute a percentage from (SQL SUM()/AVG() over zero rows is NULL).
     """
+    if value is None:
+        return "N/A"
     return f"{float(value):.2f}%"
 
 
@@ -72,8 +83,8 @@ def orm_q3(session):
     avg_gre_aw = session.execute(
         select(_round2(func.avg(Applicant.gre_aw))).where(Applicant.gre_aw.is_not(None))
     ).scalar_one()
-    return (f"Average GPA: {avg_gpa}, Average GRE: {avg_gre}, "
-            f"Average GRE V: {avg_gre_v}, Average GRE AW: {avg_gre_aw}")
+    return (f"Average GPA: {_or_na(avg_gpa)}, Average GRE: {_or_na(avg_gre)}, "
+            f"Average GRE V: {_or_na(avg_gre_v)}, Average GRE AW: {_or_na(avg_gre_aw)}")
 
 
 def orm_q4(session):
@@ -88,7 +99,7 @@ def orm_q4(session):
             )
         )
     ).scalar_one()
-    return f"Average GPA American: {avg_gpa}"
+    return f"Average GPA American: {_or_na(avg_gpa)}"
 
 
 def orm_q5(session):
@@ -113,7 +124,7 @@ def orm_q6(session):
             )
         )
     ).scalar_one()
-    return f"Average GPA accepted: {avg_gpa}"
+    return f"Average GPA accepted: {_or_na(avg_gpa)}"
 
 
 def orm_q7(session):
@@ -202,7 +213,7 @@ def orm_a1(session):
         f"{row.term} acceptance: {_format_percentage(row.cnt * 100.0 / total_accepted)}"
         for row in ordered
     ]
-    return ", ".join(parts)
+    return ", ".join(parts) if parts else "No accepted applicants found"
 
 
 def orm_a2(session):
@@ -219,10 +230,14 @@ def orm_a2(session):
         select(_round2(func.avg(Applicant.gpa)))
         .where(and_(Applicant.gpa.is_not(None), usc_match, Applicant.status.not_ilike("Accepted%")))
     ).scalar_one()
-    difference = accepted_avg - not_accepted_avg
-    return (f"USC average GPA accepted: {accepted_avg}, "
-            f"USC average GPA not accepted: {not_accepted_avg}, "
-            f"Difference: {difference}")
+    difference = (
+        accepted_avg - not_accepted_avg
+        if accepted_avg is not None and not_accepted_avg is not None
+        else None
+    )
+    return (f"USC average GPA accepted: {_or_na(accepted_avg)}, "
+            f"USC average GPA not accepted: {_or_na(not_accepted_avg)}, "
+            f"Difference: {_or_na(difference)}")
 
 
 ORM_QUESTIONS = [orm_q1, orm_q4, orm_q5, orm_q8, orm_q9, orm_a1]

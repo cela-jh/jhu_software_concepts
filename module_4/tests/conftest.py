@@ -20,12 +20,17 @@ from app import create_app
 from app import pull_control
 from database.db_helpers import connect_db, disconnect_db
 
-# The disposable cam_db_test database, never cam_db's real data. Built
-# from the current OS user rather than a hardcoded name, since local
-# trust auth authenticates by OS/role name and this must work on
-# whatever machine the suite runs on, not just one developer's; the
-# password segment is omitted entirely since trust auth ignores it.
-TEST_DATABASE_URL = f"postgresql://{getpass.getuser()}@localhost:5432/cam_db_test"
+# The disposable cam_db_test database, never cam_db's real data. If
+# DATABASE_URL is already set (as CI sets it, pointing at its own
+# Postgres service container with its own user/password), it's used
+# as-is. Otherwise it's built from the current OS user rather than a
+# hardcoded name, since local trust auth authenticates by OS/role name
+# and this must work on whatever machine the suite runs on, not just
+# one developer's; the password segment is omitted entirely since
+# trust auth ignores it.
+TEST_DATABASE_URL = os.environ.get("DATABASE_URL") or (
+    f"postgresql://{getpass.getuser()}@localhost:5432/cam_db_test"
+)
 
 # Set once for the whole session; database.db_helpers/models read
 # DATABASE_URL fresh at call time (not at import time), so this just

@@ -16,8 +16,9 @@ Cameron Ela, cela1@jh.edu
 8. [Local LLM Standardization](#8-local-llm-standardization)
 9. [Robots.txt Compliance](#9-robotstxt-compliance)
 10. [Known Bugs / Limitations](#10-known-bugs--limitations)
-11. [Citations](#11-citations)
-12. [Testing](#12-testing)
+11. [Testing](#11-testing)
+12. [Documentation](#12-documentation)
+13. [Citations](#13-citations)
 
 ## 1. Overview
 
@@ -32,8 +33,13 @@ Four files, each independently executable, cover this project's work:
 
 ```
 module_4/
+|-- README.md
 |-- requirements.txt
+|-- pytest.ini
+|-- schema.sql             : applicants table DDL, loaded locally and by CI
+|-- coverage_summary.txt   : committed terminal coverage report (section 11)
 |-- venv/                  : project virtual environment
+|-- tests/                 : all test code (markers: web, buttons, analysis, db, integration)
 |-- data/
 |   |-- applicant_data.json
 |   |-- llm_extend_applicant_data.json
@@ -68,7 +74,7 @@ module_4/
 
 ## 2. Setup
 
-1. Requires Python 3.10+, Google Chrome installed locally, and a running PostgreSQL server with a database (this project uses `cam_db`) and an `applicants` table already created (schema in [section 6](#6-loading-into-postgresql)).
+1. Requires Python 3.10+, Google Chrome installed locally, and a running PostgreSQL server with a database (this project uses `cam_db`) and an `applicants` table already created. From `module_4`: `psql -d cam_db -f schema.sql` (schema also shown in [section 6](#6-loading-into-postgresql)).
 2. From `module_4`, create and activate a virtual environment:
    ```
    python3 -m venv venv
@@ -194,6 +200,9 @@ There is no `main.py`; `scrape.py`, `load_data.py`, `query_data.py`, and `run.py
 
 ### Table schema
 
+Checked in at `module_4/schema.sql` (also loaded by CI to set up the test
+database):
+
 ```sql
 CREATE TABLE IF NOT EXISTS applicants (
     p_id INTEGER PRIMARY KEY,
@@ -310,21 +319,12 @@ GradCafe's robots.txt was reviewed manually before writing any scraping code and
 - `storage.py`'s `save_data()` assumes the file it's appending to ends in exactly the bytes it last wrote; a file edited by hand or another tool afterward could break that assumption.
 - If `run.py` is restarted mid-pull, `pull_control`'s in-memory state is lost and the page shows Pull Data as idle even though the old Chrome process may still be running. Restart cleans up that orphaned Chrome process first, so only the tracking of that run is lost.
 
-## 11. Citations
-
-### CLAUDE
-
-- Wrote test cases in small sets, stopping for human review after each test file with back-and-forth questions and explanations for understanding and covering edge cases
-- Considered edge cases and helped develop error-catching methods
-- Played major role in refactoring code into organized directories, repairing broken filepaths and imports and ensuring they wouldn't break with future refactoring
-- Created most of this README
-
-## 12. Testing
+## 11. Testing
 
 ### Setup
 
 1. Create and activate `module_4/venv`, then `pip install -r requirements.txt` (already covers `pytest`, `pytest-cov`, `pytest-randomly`, and every runtime dependency, including `llm_hosting`'s).
-2. Create a disposable `cam_db_test` PostgreSQL database with the same schema as `cam_db` (see [section 6](#6-loading-into-postgresql)) - the test suite never touches `cam_db`'s real data. `tests/conftest.py` builds a `DATABASE_URL` pointing at `cam_db_test` from the current OS user (`postgresql://<user>@localhost:5432/cam_db_test`, via `getpass.getuser()` rather than a hardcoded name, so this works on whatever machine the suite runs on) and sets it as the `DATABASE_URL` environment variable for the whole test session.
+2. Create a disposable `cam_db_test` PostgreSQL database and load the same schema as `cam_db`: `psql -d cam_db_test -f schema.sql` (see [section 6](#6-loading-into-postgresql)) - the test suite never touches `cam_db`'s real data. If `DATABASE_URL` is already set (as CI sets it, pointing at its own Postgres service container), `tests/conftest.py` uses it as-is; otherwise it builds one pointing at `cam_db_test` from the current OS user (`postgresql://<user>@localhost:5432/cam_db_test`, via `getpass.getuser()` rather than a hardcoded name, so local runs work on whatever machine the suite runs on) and sets it as the `DATABASE_URL` environment variable for the whole test session. Either way, `db_connection` refuses to run unless `cam_db_test` appears in the connection string, so a misconfigured override can never truncate real data.
 3. Local trust-authed PostgreSQL doesn't check the password's contents at all, which is why the test `DATABASE_URL` omits one entirely.
 
 ### Running the suite
@@ -343,6 +343,8 @@ This differs from the assignment instructions, which give the bare form (`pytest
 
 Every test is marked with exactly one of `web`, `buttons`, `analysis`, `db`, or `integration` (registered in `pytest.ini`); running the full unmarked `pytest module_4/tests` also works and is equivalent, since every test already carries one of these five marks.
 
+This same command runs automatically in GitHub Actions on every push, against its own disposable Postgres service container (workflow at `.github/workflows/tests.yml`, in the repository root rather than under `module_4/`).
+
 ### Coverage
 
 `pytest.ini`'s `--cov-fail-under=100` enforces 100% statement coverage across every file under `module_4/src`, including `scraping/` (Selenium/subprocess mocked, never a real browser) and `llm_hosting/` (the real `Llama`/`hf_hub_download` calls mocked, never a real model load or network request). `pytest.ini`'s own `[report]` section (read via `addopts`' `--cov-config=module_4/pytest.ini`, since coverage.py otherwise only looks for a `.coveragerc` in the invocation directory) excludes each file's `if __name__ == "__main__":` guard line - and, since excluding a compound statement's header excludes its whole block, everything under it - from that count, since that code only ever runs when a script is invoked directly, never via `import`, which is all `pytest` ever does. The current terminal summary is committed at `module_4/coverage_summary.txt`.
@@ -353,3 +355,34 @@ Every test is marked with exactly one of `web`, `buttons`, `analysis`, `db`, or 
 - Database tests use a real local PostgreSQL connection (`cam_db_test`), not a mocked one, so schema/constraint behavior (`NOT NULL`, `UNIQUE`, upsert-on-conflict) is verified for real rather than assumed.
 - Selenium, subprocess, and `urllib` calls in `scraping/scrape.py` are mocked at the point of use in every test; no test here ever launches a real Chrome instance or makes a real HTTP request.
 - The Pull Data and Update Analysis buttons carry `data-testid="pull-data-btn"` / `data-testid="update-analysis-btn"` attributes (alongside the `id` attributes the page's own JS uses), so UI tests have a stable selector that doesn't break if the visible button text or styling changes.
+
+## 12. Documentation
+
+Sphinx documentation (`docs/source/`) covers an overview and setup guide, an
+architecture description of the web/ETL/DB layers, autodoc API reference
+pages for every module, and a testing guide covering markers, selectors,
+and fixtures.
+
+### Building and viewing locally
+
+From `module_4`, with the virtual environment active:
+
+```
+pip install sphinx sphinx_rtd_theme
+sphinx-build -b html docs/source docs/build
+open docs/build/index.html        # Linux: xdg-open docs/build/index.html
+```
+
+### Published version
+
+*(TODO once published: link to the hosted Read the Docs build here.)*
+
+## 13. Citations
+
+### CLAUDE
+
+- Wrote test cases in small sets, stopping for human review and modification after each test file with back-and-forth questions and explanations for understanding and covering edge cases
+- Considered edge cases and helped develop error-catching methods
+- Executed author-selected refactoring, repairing broken filepaths and imports and ensuring they wouldn't break with future refactoring
+- Converted comments and docstrings to Sphinx format and generated Sphinx documentation
+- Created most of this README

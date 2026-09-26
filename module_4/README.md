@@ -375,7 +375,7 @@ open docs/build/index.html        # Linux: xdg-open docs/build/index.html
 
 ### Published version
 
-*(TODO once published: link to the hosted Read the Docs build here.)*
+[cela-jh-jhu-software-concepts.readthedocs.io](https://cela-jh-jhu-software-concepts.readthedocs.io/en/latest/)
 
 ## 13. Citations
 

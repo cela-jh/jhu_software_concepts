@@ -90,10 +90,12 @@
 <li><p>Create and activate <code class="docutils literal notranslate"><span class="pre">module_4/venv</span></code>, then <code class="docutils literal notranslate"><span class="pre">pip</span> <span class="pre">install</span> <span class="pre">-r</span> <span class="pre">requirements.txt</span></code>
 (already covers <code class="docutils literal notranslate"><span class="pre">pytest</span></code>, <code class="docutils literal notranslate"><span class="pre">pytest-cov</span></code>, <code class="docutils literal notranslate"><span class="pre">pytest-randomly</span></code>, and
 every runtime dependency).</p></li>
-<li><p>Create a disposable <code class="docutils literal notranslate"><span class="pre">cam_db_test</span></code> PostgreSQL database with the same
-schema as <code class="docutils literal notranslate"><span class="pre">cam_db</span></code>. The test suite never touches <code class="docutils literal notranslate"><span class="pre">cam_db</span></code>’s real
-data - <code class="docutils literal notranslate"><span class="pre">tests/conftest.py</span></code> builds a <code class="docutils literal notranslate"><span class="pre">DATABASE_URL</span></code> pointing at
-<code class="docutils literal notranslate"><span class="pre">cam_db_test</span></code> from the current OS user
+<li><p>Create a disposable <code class="docutils literal notranslate"><span class="pre">cam_db_test</span></code> PostgreSQL database and load the
+schema: <code class="docutils literal notranslate"><span class="pre">psql</span> <span class="pre">-d</span> <span class="pre">cam_db_test</span> <span class="pre">-f</span> <span class="pre">schema.sql</span></code>. The test suite never
+touches <code class="docutils literal notranslate"><span class="pre">cam_db</span></code>’s real data. If <code class="docutils literal notranslate"><span class="pre">DATABASE_URL</span></code> is already set (as
+CI sets it, pointing at its own Postgres service container),
+<code class="docutils literal notranslate"><span class="pre">tests/conftest.py</span></code> uses it as-is; otherwise it builds one pointing
+at <code class="docutils literal notranslate"><span class="pre">cam_db_test</span></code> from the current OS user
 (<code class="docutils literal notranslate"><span class="pre">postgresql://&lt;user&gt;&#64;localhost:5432/cam_db_test</span></code>, via
 <code class="docutils literal notranslate"><span class="pre">getpass.getuser()</span></code> rather than a hardcoded name) and sets it as the
 <code class="docutils literal notranslate"><span class="pre">DATABASE_URL</span></code> environment variable for the whole test session.</p></li>

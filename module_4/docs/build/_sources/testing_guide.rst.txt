@@ -7,10 +7,12 @@ Setup
 1. Create and activate ``module_4/venv``, then ``pip install -r requirements.txt``
    (already covers ``pytest``, ``pytest-cov``, ``pytest-randomly``, and
    every runtime dependency).
-2. Create a disposable ``cam_db_test`` PostgreSQL database with the same
-   schema as ``cam_db``. The test suite never touches ``cam_db``'s real
-   data - ``tests/conftest.py`` builds a ``DATABASE_URL`` pointing at
-   ``cam_db_test`` from the current OS user
+2. Create a disposable ``cam_db_test`` PostgreSQL database and load the
+   schema: ``psql -d cam_db_test -f schema.sql``. The test suite never
+   touches ``cam_db``'s real data. If ``DATABASE_URL`` is already set (as
+   CI sets it, pointing at its own Postgres service container),
+   ``tests/conftest.py`` uses it as-is; otherwise it builds one pointing
+   at ``cam_db_test`` from the current OS user
    (``postgresql://<user>@localhost:5432/cam_db_test``, via
    ``getpass.getuser()`` rather than a hardcoded name) and sets it as the
    ``DATABASE_URL`` environment variable for the whole test session.

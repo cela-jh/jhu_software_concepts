@@ -401,4 +401,8 @@ def _database_url():
 
 
 if __name__ == "__main__":
-    run_orm_queries(_database_url())
+    try:
+        run_orm_queries(_database_url())
+    except EnvironmentError as error:
+        print(error)
+        sys.exit(1)

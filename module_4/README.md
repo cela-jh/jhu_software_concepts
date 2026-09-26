@@ -355,6 +355,7 @@ This same command runs automatically in GitHub Actions on every push, against it
 - Database tests use a real local PostgreSQL connection (`cam_db_test`), not a mocked one, so schema/constraint behavior (`NOT NULL`, `UNIQUE`, upsert-on-conflict) is verified for real rather than assumed.
 - Selenium, subprocess, and `urllib` calls in `scraping/scrape.py` are mocked at the point of use in every test; no test here ever launches a real Chrome instance or makes a real HTTP request.
 - The Pull Data and Update Analysis buttons carry `data-testid="pull-data-btn"` / `data-testid="update-analysis-btn"` attributes (alongside the `id` attributes the page's own JS uses), so UI tests have a stable selector that doesn't break if the visible button text or styling changes.
+- Structural page assertions (button presence, "Answer:" labeling) parse the rendered HTML with BeautifulSoup and query by selector (`data-testid`, `.answer`) rather than searching the raw response body for substrings, so a test doesn't pass or fail based on incidental whitespace or unrelated text elsewhere on the page. Percentage-formatting assertions use a regex instead, since a percentage is a text value, not a structural element.
 
 ## 12. Documentation
 

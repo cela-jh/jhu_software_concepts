@@ -18,4 +18,5 @@ local LLM standardizer.
    architecture
    modules/modules
    testing_guide
+   operational_notes
 

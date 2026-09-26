@@ -19,6 +19,7 @@
     <script src="_static/js/theme.js"></script>
     <link rel="index" title="Index" href="genindex.html" />
     <link rel="search" title="Search" href="search.html" />
+    <link rel="next" title="Operational Notes" href="operational_notes.html" />
     <link rel="prev" title="scraping.storage module" href="modules/scraping.storage.html" /> 
 </head>
 
@@ -56,6 +57,8 @@
 <li class="toctree-l2"><a class="reference internal" href="#notes-on-test-design">Notes on test design</a></li>
 </ul>
 </li>
+<li class="toctree-l1"><a class="reference internal" href="operational_notes.html">Operational Notes</a></li>
+<li class="toctree-l1"><a class="reference internal" href="operational_notes.html#troubleshooting">Troubleshooting</a></li>
 </ul>
 
         </div>
@@ -201,6 +204,11 @@ are mocked at the point of use in every test.</p></li>
 <li><p><code class="docutils literal notranslate"><span class="pre">llm_hosting/app.py</span></code> and <code class="docutils literal notranslate"><span class="pre">llm_hosting/llm_helper.py</span></code> are loaded via
 <code class="docutils literal notranslate"><span class="pre">importlib</span></code> under names other than <code class="docutils literal notranslate"><span class="pre">app</span></code>, since a bare <code class="docutils literal notranslate"><span class="pre">import</span> <span class="pre">app</span></code>
 would resolve to the already-imported Flask <code class="docutils literal notranslate"><span class="pre">app</span></code> package instead.</p></li>
+<li><p>Structural page assertions (button presence, “Answer:” labeling) parse
+the rendered HTML with BeautifulSoup and query by selector
+(<code class="docutils literal notranslate"><span class="pre">data-testid</span></code>, <code class="docutils literal notranslate"><span class="pre">.answer</span></code>) rather than searching the raw response
+body for substrings. Percentage-formatting assertions use a regex
+instead, since a percentage is a text value, not a structural element.</p></li>
 </ul>
 </section>
 </section>
@@ -210,6 +218,7 @@ would resolve to the already-imported Flask <code class="docutils literal notran
           </div>
           <footer><div class="rst-footer-buttons" role="navigation" aria-label="Footer">
         <a href="modules/scraping.storage.html" class="btn btn-neutral float-left" title="scraping.storage module" accesskey="p" rel="prev"><span class="fa fa-arrow-circle-left" aria-hidden="true"></span> Previous</a>
+        <a href="operational_notes.html" class="btn btn-neutral float-right" title="Operational Notes" accesskey="n" rel="next">Next <span class="fa fa-arrow-circle-right" aria-hidden="true"></span></a>
     </div>
 
   <hr/>

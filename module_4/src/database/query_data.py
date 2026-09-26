@@ -342,4 +342,8 @@ def _database_url():
 
 
 if __name__ == "__main__":
-    analyze(QUESTION_QUERY, _database_url())
+    try:
+        analyze(QUESTION_QUERY, _database_url())
+    except EnvironmentError as error:
+        print(error)
+        sys.exit(1)

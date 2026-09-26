@@ -10,6 +10,7 @@ from decimal import Decimal
 from types import SimpleNamespace
 
 import pytest
+from bs4 import BeautifulSoup
 
 from database.orm_queries import (
     _format_percentage, _or_na, orm_a1, orm_a2, orm_q2, orm_q3, orm_q5,
@@ -191,8 +192,11 @@ def test_analysis_page_labels_every_result_answer(client, monkeypatch):
 
     response = client.get("/analysis")
 
-    page = response.get_data(as_text=True)
-    assert page.count("Answer:") == len(fake_questions)
+    soup = BeautifulSoup(response.get_data(as_text=True), "html.parser")
+    answer_elements = soup.select(".answer")
+    assert len(answer_elements) == len(fake_questions)
+    for element in answer_elements:
+        assert element.get_text().startswith("Answer:")
 
 
 @pytest.mark.analysis

@@ -5,6 +5,7 @@ its buttons depend on, and that the analysis page itself renders the
 required structure.
 """
 import pytest
+from bs4 import BeautifulSoup
 from sqlalchemy.exc import OperationalError
 
 
@@ -59,11 +60,12 @@ def test_analysis(client, monkeypatch):
     response = client.get("/analysis")
 
     assert response.status_code == 200
-    page = response.get_data(as_text=True)
-    assert "Pull Data" in page
-    assert "Update Analysis" in page
-    assert "Analysis" in page
-    assert "Answer:" in page
+    soup = BeautifulSoup(response.get_data(as_text=True), "html.parser")
+    assert soup.find(attrs={"data-testid": "pull-data-btn"}) is not None
+    assert soup.find(attrs={"data-testid": "update-analysis-btn"}) is not None
+    assert "Analysis" in soup.find("h1").get_text()
+    assert soup.select_one(".answer") is not None
+    assert soup.select_one(".answer").get_text().startswith("Answer:")
 
 
 @pytest.mark.web

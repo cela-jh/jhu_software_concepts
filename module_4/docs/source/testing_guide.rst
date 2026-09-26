@@ -123,3 +123,8 @@ Notes on test design
 - ``llm_hosting/app.py`` and ``llm_hosting/llm_helper.py`` are loaded via
   ``importlib`` under names other than ``app``, since a bare ``import app``
   would resolve to the already-imported Flask ``app`` package instead.
+- Structural page assertions (button presence, "Answer:" labeling) parse
+  the rendered HTML with BeautifulSoup and query by selector
+  (``data-testid``, ``.answer``) rather than searching the raw response
+  body for substrings. Percentage-formatting assertions use a regex
+  instead, since a percentage is a text value, not a structural element.

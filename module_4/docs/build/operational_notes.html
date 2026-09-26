@@ -1,0 +1,247 @@
+
+
+<!DOCTYPE html>
+<html class="writer-html5" lang="en" data-content_root="./">
+<head>
+  <meta charset="utf-8" /><meta name="viewport" content="width=device-width, initial-scale=1" />
+
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Operational Notes &mdash; GradCafe Analytics 1.0 documentation</title>
+      <link rel="stylesheet" type="text/css" href="_static/pygments.css?v=b86133f3" />
+      <link rel="stylesheet" type="text/css" href="_static/css/theme.css?v=9edc463e" />
+
+  
+      <script src="_static/jquery.js?v=5d32c60e"></script>
+      <script src="_static/_sphinx_javascript_frameworks_compat.js?v=2cd50e6c"></script>
+      <script src="_static/documentation_options.js?v=f2a433a1"></script>
+      <script src="_static/doctools.js?v=fd6eb6e6"></script>
+      <script src="_static/sphinx_highlight.js?v=6ffebe34"></script>
+    <script src="_static/js/theme.js"></script>
+    <link rel="index" title="Index" href="genindex.html" />
+    <link rel="search" title="Search" href="search.html" />
+    <link rel="prev" title="Testing Guide" href="testing_guide.html" /> 
+</head>
+
+<body class="wy-body-for-nav"> 
+  <div class="wy-grid-for-nav">
+    <nav data-toggle="wy-nav-shift" class="wy-nav-side">
+      <div class="wy-side-scroll">
+        <div class="wy-side-nav-search" >
+
+          
+          
+          <a href="index.html" class="icon icon-home">
+            GradCafe Analytics
+          </a>
+<div role="search">
+  <form id="rtd-search-form" class="wy-form" action="search.html" method="get">
+    <input type="text" name="q" placeholder="Search docs" aria-label="Search docs" />
+    <input type="hidden" name="check_keywords" value="yes" />
+    <input type="hidden" name="area" value="default" />
+  </form>
+</div>
+        </div><div class="wy-menu wy-menu-vertical" data-spy="affix" role="navigation" aria-label="Navigation menu">
+              <p class="caption" role="heading"><span class="caption-text">Contents:</span></p>
+<ul class="current">
+<li class="toctree-l1"><a class="reference internal" href="overview_setup.html">Overview &amp; Setup</a></li>
+<li class="toctree-l1"><a class="reference internal" href="architecture.html">Architecture</a></li>
+<li class="toctree-l1"><a class="reference internal" href="modules/modules.html">API Reference</a></li>
+<li class="toctree-l1"><a class="reference internal" href="testing_guide.html">Testing Guide</a></li>
+<li class="toctree-l1 current"><a class="current reference internal" href="#">Operational Notes</a><ul>
+<li class="toctree-l2"><a class="reference internal" href="#busy-state-policy">Busy-state policy</a></li>
+<li class="toctree-l2"><a class="reference internal" href="#idempotency-strategy">Idempotency strategy</a></li>
+<li class="toctree-l2"><a class="reference internal" href="#uniqueness-keys">Uniqueness keys</a></li>
+</ul>
+</li>
+<li class="toctree-l1"><a class="reference internal" href="#troubleshooting">Troubleshooting</a><ul>
+<li class="toctree-l2"><a class="reference internal" href="#local-setup">Local setup</a></li>
+<li class="toctree-l2"><a class="reference internal" href="#ci">CI</a></li>
+<li class="toctree-l2"><a class="reference internal" href="#read-the-docs">Read the Docs</a></li>
+</ul>
+</li>
+</ul>
+
+        </div>
+      </div>
+    </nav>
+
+    <section data-toggle="wy-nav-shift" class="wy-nav-content-wrap"><nav class="wy-nav-top" aria-label="Mobile navigation menu" >
+          <i data-toggle="wy-nav-top" class="fa fa-bars"></i>
+          <a href="index.html">GradCafe Analytics</a>
+      </nav>
+
+      <div class="wy-nav-content">
+        <div class="rst-content">
+          <div role="navigation" aria-label="Page navigation">
+  <ul class="wy-breadcrumbs">
+      <li><a href="index.html" class="icon icon-home" aria-label="Home"></a></li>
+      <li class="breadcrumb-item active">Operational Notes</li>
+      <li class="wy-breadcrumbs-aside">
+            <a href="_sources/operational_notes.rst.txt" rel="nofollow"> View page source</a>
+      </li>
+  </ul>
+  <hr/>
+</div>
+          <div role="main" class="document" itemscope="itemscope" itemtype="http://schema.org/Article">
+           <div itemprop="articleBody">
+             
+  <section id="operational-notes">
+<h1>Operational Notes<a class="headerlink" href="#operational-notes" title="Link to this heading"></a></h1>
+<section id="busy-state-policy">
+<h2>Busy-state policy<a class="headerlink" href="#busy-state-policy" title="Link to this heading"></a></h2>
+<p>Only one Grad Cafe pull may run at a time, process-wide. <code class="docutils literal notranslate"><span class="pre">app/pull_control.py</span></code>
+tracks this with a single module-level <code class="docutils literal notranslate"><span class="pre">_thread</span></code>, guarded by a lock:</p>
+<ul class="simple">
+<li><p><code class="docutils literal notranslate"><span class="pre">is_running()</span></code> reports <code class="docutils literal notranslate"><span class="pre">True</span></code> only while that thread is alive, covering
+both the scrape subprocess itself and the database upload that follows it.</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">POST</span> <span class="pre">/pull-data</span></code> refuses to start a second pull while one is active,
+returning <code class="docutils literal notranslate"><span class="pre">409</span></code> with <code class="docutils literal notranslate"><span class="pre">{&quot;ok&quot;:</span> <span class="pre">false,</span> <span class="pre">&quot;busy&quot;:</span> <span class="pre">true,</span> <span class="pre">&quot;status&quot;:</span> <span class="pre">&quot;already_running&quot;}</span></code>.</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">POST</span> <span class="pre">/update-analysis</span></code> is gated the same way, returning <code class="docutils literal notranslate"><span class="pre">409</span></code> with
+<code class="docutils literal notranslate"><span class="pre">{&quot;ok&quot;:</span> <span class="pre">false,</span> <span class="pre">&quot;busy&quot;:</span> <span class="pre">true,</span> <span class="pre">&quot;status&quot;:</span> <span class="pre">&quot;busy&quot;}</span></code>, since a running pull’s own
+upload step already owns the same table - an Update Analysis running
+concurrently could read a half-written state.</p></li>
+<li><p>State is observable (<code class="docutils literal notranslate"><span class="pre">is_running()</span></code>) and injectable in tests (a fake
+thread stood in for <code class="docutils literal notranslate"><span class="pre">pull_control._thread</span></code>), rather than inferred by
+sleeping and hoping enough time has passed - the SHALL NOT on arbitrary
+<code class="docutils literal notranslate"><span class="pre">sleep()</span></code> for busy-state checks is designed around exactly this.</p></li>
+<li><p>Reloading the page while a pull is running still shows the current status
+correctly, since <code class="docutils literal notranslate"><span class="pre">GET</span> <span class="pre">/analysis</span></code> reads the same <code class="docutils literal notranslate"><span class="pre">is_running()</span></code> /
+<code class="docutils literal notranslate"><span class="pre">recent_lines()</span></code> state on every request rather than caching it.</p></li>
+</ul>
+</section>
+<section id="idempotency-strategy">
+<h2>Idempotency strategy<a class="headerlink" href="#idempotency-strategy" title="Link to this heading"></a></h2>
+<p>Loading a results file - whether from Pull Data, Update Analysis, or the
+<code class="docutils literal notranslate"><span class="pre">load_data.py</span></code> CLI directly - is always an upsert, never a plain insert:</p>
+<div class="highlight-sql notranslate"><div class="highlight"><pre><span></span><span class="k">INSERT</span><span class="w"> </span><span class="k">INTO</span><span class="w"> </span><span class="n">applicants</span><span class="w"> </span><span class="p">(...)</span>
+<span class="k">VALUES</span><span class="w"> </span><span class="p">(...)</span>
+<span class="k">ON</span><span class="w"> </span><span class="n">CONFLICT</span><span class="w"> </span><span class="p">(</span><span class="n">url</span><span class="p">)</span><span class="w"> </span><span class="k">DO</span><span class="w"> </span><span class="k">UPDATE</span><span class="w"> </span><span class="k">SET</span>
+<span class="w">    </span><span class="n">program</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="k">COALESCE</span><span class="p">(</span><span class="n">EXCLUDED</span><span class="p">.</span><span class="n">program</span><span class="p">,</span><span class="w"> </span><span class="n">applicants</span><span class="p">.</span><span class="n">program</span><span class="p">),</span>
+<span class="w">    </span><span class="p">...</span>
+<span class="n">RETURNING</span><span class="w"> </span><span class="n">url</span><span class="p">,</span><span class="w"> </span><span class="p">(</span><span class="n">xmax</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="mi">0</span><span class="p">)</span><span class="w"> </span><span class="k">AS</span><span class="w"> </span><span class="n">inserted</span><span class="p">;</span>
+</pre></div>
+</div>
+<p>A result whose <code class="docutils literal notranslate"><span class="pre">url</span></code> already exists in the table updates that row instead
+of being skipped or duplicated. Each column is set to
+<code class="docutils literal notranslate"><span class="pre">COALESCE(new</span> <span class="pre">value,</span> <span class="pre">existing</span> <span class="pre">value)</span></code>, so a new non-null value overwrites
+what’s there, but a field the new file lacks (or provides as null) leaves
+the existing value untouched. This is what makes running Pull Data twice
+against overlapping data safe: the second run’s already-seen rows simply
+update themselves in place with whatever’s new (usually nothing), rather
+than erroring or producing duplicate rows.</p>
+</section>
+<section id="uniqueness-keys">
+<h2>Uniqueness keys<a class="headerlink" href="#uniqueness-keys" title="Link to this heading"></a></h2>
+<p>Two constraints, enforced by PostgreSQL itself rather than assumed by
+application code:</p>
+<ul class="simple">
+<li><p><code class="docutils literal notranslate"><span class="pre">p_id</span> <span class="pre">INTEGER</span> <span class="pre">PRIMARY</span> <span class="pre">KEY</span></code> - not auto-incrementing. It’s derived
+deterministically from the numeric Grad Cafe result id embedded in each
+entry’s url (<code class="docutils literal notranslate"><span class="pre">.../result/1020482</span></code> -&gt; <code class="docutils literal notranslate"><span class="pre">p_id</span></code> <code class="docutils literal notranslate"><span class="pre">1020482</span></code>), so the same
+scraped result always maps to the same row, run after run.</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">url</span> <span class="pre">TEXT</span> <span class="pre">UNIQUE</span> <span class="pre">NOT</span> <span class="pre">NULL</span></code> - the actual conflict target for the upsert
+above. Since <code class="docutils literal notranslate"><span class="pre">p_id</span></code> is derived from <code class="docutils literal notranslate"><span class="pre">url</span></code>, the two constraints agree by
+construction; <code class="docutils literal notranslate"><span class="pre">url</span></code> is what <code class="docutils literal notranslate"><span class="pre">ON</span> <span class="pre">CONFLICT</span></code> keys off, since it’s the
+natural identity of a scraped result.</p></li>
+</ul>
+</section>
+</section>
+<section id="troubleshooting">
+<h1>Troubleshooting<a class="headerlink" href="#troubleshooting" title="Link to this heading"></a></h1>
+<section id="local-setup">
+<h2>Local setup<a class="headerlink" href="#local-setup" title="Link to this heading"></a></h2>
+<dl class="simple">
+<dt><strong>“could not connect to server” / `connect_db` prints an error and returns None</strong></dt><dd><p>PostgreSQL isn’t running, or <code class="docutils literal notranslate"><span class="pre">DATABASE_URL</span></code> points at the wrong host,
+port, or database name. Confirm the server is up and
+<code class="docutils literal notranslate"><span class="pre">psql</span> <span class="pre">&quot;$DATABASE_URL&quot;</span> <span class="pre">-c</span> <span class="pre">'\dt'</span></code> succeeds on its own before running the
+app or tests.</p>
+</dd>
+<dt><strong>`db_connection` fixture raises “Refusing to run db tests against a non-test database”</strong></dt><dd><p><code class="docutils literal notranslate"><span class="pre">DATABASE_URL</span></code> doesn’t contain <code class="docutils literal notranslate"><span class="pre">cam_db_test</span></code>. This guard exists so a
+misconfigured environment variable can never point the test suite’s
+<code class="docutils literal notranslate"><span class="pre">TRUNCATE</span></code> calls at real data; fix the environment variable, don’t
+remove the guard.</p>
+</dd>
+<dt><strong>`relation “applicants” does not exist`</strong></dt><dd><p>The schema hasn’t been loaded into that database yet. Run
+<code class="docutils literal notranslate"><span class="pre">psql</span> <span class="pre">-d</span> <span class="pre">&lt;dbname&gt;</span> <span class="pre">-f</span> <span class="pre">schema.sql</span></code> from <code class="docutils literal notranslate"><span class="pre">module_4</span></code> first (see
+<a class="reference internal" href="overview_setup.html"><span class="doc">Overview &amp; Setup</span></a>).</p>
+</dd>
+<dt><strong>Bare `pytest -m “…”` reports 0% coverage, or errors with a `ConfigError` about `pytest.ini`</strong></dt><dd><p>See <a class="reference internal" href="testing_guide.html"><span class="doc">Testing Guide</span></a> - use
+<code class="docutils literal notranslate"><span class="pre">pytest</span> <span class="pre">module_4/tests</span> <span class="pre">-m</span> <span class="pre">&quot;web</span> <span class="pre">or</span> <span class="pre">buttons</span> <span class="pre">or</span> <span class="pre">analysis</span> <span class="pre">or</span> <span class="pre">db</span> <span class="pre">or</span> <span class="pre">integration&quot;</span></code>
+from the repository root, which is the one invocation that resolves
+both the marker config and the coverage path correctly.</p>
+</dd>
+<dt><strong>Pull Data hangs on a real (non-test) run, Chrome window shows “Just a moment…”</strong></dt><dd><p>That’s Cloudflare’s challenge page, not a bug. Solve it once in the
+visible Chrome window; the scraper polls for the title to clear rather
+than waiting on a keypress, so this works the same whether run directly
+or as Pull Data’s background subprocess.</p>
+</dd>
+</dl>
+</section>
+<section id="ci">
+<h2>CI<a class="headerlink" href="#ci" title="Link to this heading"></a></h2>
+<dl class="simple">
+<dt><strong>The “Install dependencies” step takes several minutes with no visible progress</strong></dt><dd><p>Most dependencies install from prebuilt wheels in seconds. The
+exception is <code class="docutils literal notranslate"><span class="pre">llama-cpp-python</span></code>, which falls back to compiling
+<code class="docutils literal notranslate"><span class="pre">llama.cpp</span></code> from source via CMake if no matching prebuilt wheel exists
+for the runner’s platform - that can take several minutes on a 2-core
+GitHub-hosted runner. This is expected, not a stall; check the log for
+compiler output to confirm it’s still running.</p>
+</dd>
+<dt><strong>Workflow logs show a Node.js 20 deprecation warning</strong></dt><dd><p>Cosmetic - it’s about the Node runtime GitHub Actions uses internally to
+execute action wrapper code, unrelated to this project’s Python/Postgres
+pipeline. Fixed by using current major versions of the actions involved
+(<code class="docutils literal notranslate"><span class="pre">actions/checkout&#64;v5</span></code>, <code class="docutils literal notranslate"><span class="pre">actions/setup-python&#64;v6</span></code>).</p>
+</dd>
+<dt><strong>A Postgres-dependent step fails immediately with “connection refused”</strong></dt><dd><p>The <code class="docutils literal notranslate"><span class="pre">postgres</span></code> service container’s health check
+(<code class="docutils literal notranslate"><span class="pre">pg_isready</span></code>) may not have passed yet before a later step ran. Confirm
+the workflow’s <code class="docutils literal notranslate"><span class="pre">services.postgres.options</span></code> includes a health check and
+that no step bypasses the wait.</p>
+</dd>
+</dl>
+</section>
+<section id="read-the-docs">
+<h2>Read the Docs<a class="headerlink" href="#read-the-docs" title="Link to this heading"></a></h2>
+<dl class="simple">
+<dt><strong>The RTD build fails trying to install `psycopg` or another compiled dependency</strong></dt><dd><p><code class="docutils literal notranslate"><span class="pre">module_4/docs/requirements.txt</span></code> is a deliberately smaller,
+docs-only dependency list - it uses <code class="docutils literal notranslate"><span class="pre">psycopg[binary]</span></code> specifically so
+the build doesn’t depend on a system <code class="docutils literal notranslate"><span class="pre">libpq</span></code> install being present on
+RTD’s image, and it omits <code class="docutils literal notranslate"><span class="pre">huggingface_hub</span></code>/<code class="docutils literal notranslate"><span class="pre">llama-cpp-python</span></code>
+entirely, since no module that successfully autodoc-imports needs them.
+If autodoc needs a new import satisfied, add it there, not to the full
+application <code class="docutils literal notranslate"><span class="pre">requirements.txt</span></code>, to keep the docs build fast.</p>
+</dd>
+</dl>
+</section>
+</section>
+
+
+           </div>
+          </div>
+          <footer><div class="rst-footer-buttons" role="navigation" aria-label="Footer">
+        <a href="testing_guide.html" class="btn btn-neutral float-left" title="Testing Guide" accesskey="p" rel="prev"><span class="fa fa-arrow-circle-left" aria-hidden="true"></span> Previous</a>
+    </div>
+
+  <hr/>
+
+  <div role="contentinfo">
+    <p>&#169; Copyright 2026, Cameron Ela.</p>
+  </div>
+
+  Built with <a href="https://www.sphinx-doc.org/">Sphinx</a> using a
+    <a href="https://github.com/readthedocs/sphinx_rtd_theme">theme</a>
+    provided by <a href="https://readthedocs.org">Read the Docs</a>.
+   
+
+</footer>
+        </div>
+      </div>
+    </section>
+  </div>
+  <script>
+      jQuery(function () {
+          SphinxRtdTheme.Navigation.enable(true);
+      });
+  </script> 
+
+</body>
+</html>

@@ -27,4 +27,4 @@ module_4/src/scraping/storage.py            42      0   100%
 TOTAL                                     1181      0   100%
 
 Required test coverage of 100% reached. Total coverage: 100.00%
-207 passed in 2.34s
+207 passed in 2.40s

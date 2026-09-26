@@ -45,6 +45,8 @@
 <li class="toctree-l1"><a class="reference internal" href="../../architecture.html">Architecture</a></li>
 <li class="toctree-l1"><a class="reference internal" href="../../modules/modules.html">API Reference</a></li>
 <li class="toctree-l1"><a class="reference internal" href="../../testing_guide.html">Testing Guide</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../operational_notes.html">Operational Notes</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../operational_notes.html#troubleshooting">Troubleshooting</a></li>
 </ul>
 
         </div>
@@ -511,7 +513,11 @@
 
 
 <span class="k">if</span> <span class="vm">__name__</span> <span class="o">==</span> <span class="s2">"__main__"</span><span class="p">:</span>
-    <span class="n">run_orm_queries</span><span class="p">(</span><span class="n">_database_url</span><span class="p">())</span>
+    <span class="k">try</span><span class="p">:</span>
+        <span class="n">run_orm_queries</span><span class="p">(</span><span class="n">_database_url</span><span class="p">())</span>
+    <span class="k">except</span> <span class="ne">EnvironmentError</span> <span class="k">as</span> <span class="n">error</span><span class="p">:</span>
+        <span class="nb">print</span><span class="p">(</span><span class="n">error</span><span class="p">)</span>
+        <span class="n">sys</span><span class="o">.</span><span class="n">exit</span><span class="p">(</span><span class="mi">1</span><span class="p">)</span>
 </pre></div>
 
            </div>

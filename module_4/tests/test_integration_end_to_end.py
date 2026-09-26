@@ -7,6 +7,7 @@ renders live, correctly formatted analysis computed from those same
 rows - no mocked ALL_ORM_ANSWERS here, the real ORM queries run for real.
 """
 import pytest
+from bs4 import BeautifulSoup
 
 from app import pull_control
 from helpers import (
@@ -57,19 +58,21 @@ def test_pull_update_render_end_to_end(client, monkeypatch, tmp_path, db_connect
 
     render_response = client.get("/analysis")
     assert render_response.status_code == 200
-    page = render_response.get_data(as_text=True)
+    soup = BeautifulSoup(render_response.get_data(as_text=True), "html.parser")
 
-    assert "Pull Data" in page
-    assert "Update Analysis" in page
-    assert page.count("Answer:") > 0
-    _assert_all_two_decimal_percentages(page)
+    assert soup.find(attrs={"data-testid": "pull-data-btn"}) is not None
+    assert soup.find(attrs={"data-testid": "update-analysis-btn"}) is not None
+    answer_elements = soup.select(".answer")
+    assert len(answer_elements) > 0
+    page_text = soup.get_text()
+    _assert_all_two_decimal_percentages(page_text)
     # orm_q1 counts Fall 2026 entries; two of the three faked rows are
     # Fall 2026, so the real (unmocked) query should reflect that.
-    assert "Applicant count: 2" in page
+    assert "Applicant count: 2" in page_text
     # None of the faked rows are USC, so orm_a2 has no data on either side
     # of its accepted/not-accepted comparison; it should report "N/A"
     # rather than crashing the whole page on None - None.
-    assert "USC average GPA accepted: N/A" in page
+    assert "USC average GPA accepted: N/A" in page_text
 
 
 @pytest.mark.integration

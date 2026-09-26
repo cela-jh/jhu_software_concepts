@@ -56,17 +56,25 @@ def _handle_sigterm(signum, frame):
 
 def create_profile_dir():
     """
-    Creates a new temporary Chrome profile directory.
-    Returns the path.
+    Create a new temporary Chrome profile directory.
+
+    :returns: The profile directory's path.
+    :rtype: str
     """
     return tempfile.mkdtemp()
 
 
 def _open_chrome(chrome_bin, profile_dir):
     """
-    Opens Chrome in remote debugging mode using given Chrome binary path
+    Open Chrome in remote debugging mode using given Chrome binary path
     and a persistent profile directory.
-    Returns the Chrome process.
+
+    :param chrome_bin: Path to the Chrome binary to launch.
+    :type chrome_bin: str or pathlib.Path
+    :param profile_dir: Path to the Chrome profile directory to use.
+    :type profile_dir: str
+    :returns: The Chrome process.
+    :rtype: subprocess.Popen
     """
     chrome_process = subprocess.Popen(
         [
@@ -85,7 +93,15 @@ def _open_chrome(chrome_bin, profile_dir):
 
 def _try_debug_endpoint(host_port, retries=10):
     """
-    Tries opening the debugging endpoint until open or reaching number of retries.
+    Try opening the debugging endpoint until open or reaching number of
+    retries.
+
+    :param host_port: The debugging endpoint's base URL.
+    :type host_port: str
+    :param retries: How many times to retry before giving up.
+    :type retries: int
+    :returns: None.
+    :rtype: None
     """
     for _ in range(retries):
         try:
@@ -98,7 +114,11 @@ def _try_debug_endpoint(host_port, retries=10):
 def _init_webdriver(host_port):
     """
     Create Chrome webdriver with remote debug options.
-    Returns Chrome driver.
+
+    :param host_port: The debugging endpoint's host:port address.
+    :type host_port: str
+    :returns: The Chrome driver.
+    :rtype: selenium.webdriver.Chrome
     """
     options = webdriver.ChromeOptions()
     options.debugger_address = host_port
@@ -113,10 +133,16 @@ def _init_webdriver(host_port):
 
 def terminate_process(process, timeout=10):
     """
-    Terminates the given Chrome process, force-killing it if it doesn't
-    respond to termination within the timeout. Does not remove the profile
-    directory, since it may be reused across restarts.
-    Returns none.
+    Terminate the given Chrome process, force-killing it if it doesn't
+    respond to termination within the timeout. Does not remove the
+    profile directory, since it may be reused across restarts.
+
+    :param process: The Chrome process to terminate.
+    :type process: subprocess.Popen
+    :param timeout: Seconds to wait for a clean exit before killing it.
+    :type timeout: int
+    :returns: None.
+    :rtype: None
     """
     process.terminate()
     try:
@@ -128,9 +154,13 @@ def terminate_process(process, timeout=10):
 
 def cleanup_profile(profile_dir):
     """
-    Removes the given Chrome profile directory. Call only once the profile
-    is done being reused (i.e. scraping has fully finished).
-    Returns none.
+    Remove the given Chrome profile directory. Call only once the
+    profile is done being reused (i.e. scraping has fully finished).
+
+    :param profile_dir: Path to the Chrome profile directory to remove.
+    :type profile_dir: str
+    :returns: None.
+    :rtype: None
     """
     shutil.rmtree(profile_dir)
 
@@ -141,12 +171,20 @@ CLOUDFLARE_POLL_INTERVAL = 3
 
 def _wait_for_cloudflare(driver, timeout=CLOUDFLARE_WAIT_TIMEOUT, poll_interval=CLOUDFLARE_POLL_INTERVAL):
     """
-    Waits for a human to clear Cloudflare's challenge in the visible
-    Chrome window, polling the page title instead of blocking on keyboard
-    input, so this works whether scrape.py is run directly or as a
-    subprocess with no interactive terminal to type into.
-    Raises TimeoutError if the challenge isn't cleared within timeout.
-    Returns none.
+    Wait for a human to clear Cloudflare's challenge in the visible
+    Chrome window, polling the page title instead of blocking on
+    keyboard input, so this works whether scrape.py is run directly or
+    as a subprocess with no interactive terminal to type into.
+
+    :param driver: The active Selenium Chrome driver.
+    :type driver: selenium.webdriver.Chrome
+    :param timeout: Seconds to wait before giving up.
+    :type timeout: int
+    :param poll_interval: Seconds between checks of the page title.
+    :type poll_interval: int
+    :raises TimeoutError: If the challenge isn't cleared within timeout.
+    :returns: None.
+    :rtype: None
     """
     print(f"Cloudflare check shown; complete it in the browser window. "
           f"Waiting up to {timeout}s...")
@@ -184,14 +222,18 @@ AD_TRACKER_URL_PATTERNS = [
 
 def _block_ad_trackers(driver):
     """
-    Blocks known ad and real-time-bidding tracker requests via Chrome
+    Block known ad and real-time-bidding tracker requests via Chrome
     DevTools Protocol. GradCafe's page loads dozens of ad-auction and
     cookie-sync iframes on every visit; since a fresh, cookie-less Chrome
     profile is used for every scrape (needed for the Cloudflare
     workaround), this full ad auction re-runs from scratch every time,
     spawning enough renderer processes to stall the page for minutes.
     None of this is needed to read the results table.
-    Returns none.
+
+    :param driver: The active Selenium Chrome driver.
+    :type driver: selenium.webdriver.Chrome
+    :returns: None.
+    :rtype: None
     """
     driver.execute_cdp_cmd("Network.enable", {})
     driver.execute_cdp_cmd("Network.setBlockedURLs", {"urls": AD_TRACKER_URL_PATTERNS})
@@ -199,12 +241,28 @@ def _block_ad_trackers(driver):
 
 def chrome_helper(url, host_port, chrome_bin, profile_dir, retries=5, base_retry_delay=15):
     """
-    Helper to work around Cloudflare verification at url (GradCafe), using a
+    Work around Cloudflare verification at url (GradCafe), using a
     persistent Chrome profile so a cleared session survives restarts.
-    Retries the initial navigation on transient errors, then only waits for
-    manual completion if a Cloudflare challenge is actually shown. Cleans up
-    its own spawned process if initialization fails partway through.
-    Returns resulting driver and Chrome process.
+    Retries the initial navigation on transient errors, then only waits
+    for manual completion if a Cloudflare challenge is actually shown.
+    Cleans up its own spawned process if initialization fails partway
+    through.
+
+    :param url: The URL to navigate to.
+    :type url: str
+    :param host_port: The debugging endpoint's host:port address.
+    :type host_port: str
+    :param chrome_bin: Path to the Chrome binary to launch.
+    :type chrome_bin: str or pathlib.Path
+    :param profile_dir: Path to the Chrome profile directory to use.
+    :type profile_dir: str
+    :param retries: How many times to retry the initial navigation.
+    :type retries: int
+    :param base_retry_delay: Base delay in seconds between retries,
+        doubled on each subsequent attempt.
+    :type base_retry_delay: int
+    :returns: The resulting driver and Chrome process.
+    :rtype: tuple(selenium.webdriver.Chrome, subprocess.Popen)
     """
     chrome_process = _open_chrome(chrome_bin, profile_dir)
     try:
@@ -237,11 +295,18 @@ def chrome_helper(url, host_port, chrome_bin, profile_dir, retries=5, base_retry
 
 def check_robots_allowed(url, user_agent="*"):
     """
-    Checks the site's robots.txt to see if scraping is permitted on the domain.
-    Fetches it with a browser-like User-Agent, since Cloudflare returns a 403
-    for RobotFileParser's default "Python-urllib/x.y" UA - which robotparser's
-    read() treats as "disallow everything" rather than as a fetch failure.
-    Returns True if allowed, else False.
+    Check the site's robots.txt to see if scraping is permitted on the
+    domain. Fetches it with a browser-like User-Agent, since Cloudflare
+    returns a 403 for RobotFileParser's default "Python-urllib/x.y" UA -
+    which robotparser's read() treats as "disallow everything" rather
+    than as a fetch failure.
+
+    :param url: The URL to check permission for.
+    :type url: str
+    :param user_agent: The user agent to check permission for.
+    :type user_agent: str
+    :returns: True if allowed, else False.
+    :rtype: bool
     """
     parsed = urlparse(url)
     robots_url = f"{parsed.scheme}://{parsed.netloc}/robots.txt"
@@ -259,12 +324,26 @@ def check_robots_allowed(url, user_agent="*"):
 
 def _get_page(driver, url=None, wait=2, retries=5, base_retry_delay=15):
     """
-    Loads a page either by navigating to `url` directly, or, if url is None,
-    by using whatever page is currently loaded (like after clicking "Next").
-    Retries by re-navigating (or refreshing) on transient errors or
-    unexpected page content, with an exponentially growing delay between
-    attempts, and a randomized polling delay once successful.
-    Returns a BeautifulSoup object.
+    Load a page either by navigating to `url` directly, or, if url is
+    None, by using whatever page is currently loaded (like after
+    clicking "Next"). Retries by re-navigating (or refreshing) on
+    transient errors or unexpected page content, with an exponentially
+    growing delay between attempts, and a randomized polling delay once
+    successful.
+
+    :param driver: The active Selenium Chrome driver.
+    :type driver: selenium.webdriver.Chrome
+    :param url: The URL to navigate to, or None to use the current page.
+    :type url: str or None
+    :param wait: Base seconds to politely wait after a successful load.
+    :type wait: float
+    :param retries: How many times to retry on failure.
+    :type retries: int
+    :param base_retry_delay: Base delay in seconds between retries,
+        doubled on each subsequent attempt.
+    :type base_retry_delay: int
+    :returns: The parsed page.
+    :rtype: bs4.BeautifulSoup
     """
     soup = None
     for attempt in range(1, retries + 1):
@@ -297,16 +376,31 @@ def _get_page(driver, url=None, wait=2, retries=5, base_retry_delay=15):
 def _click_next_page(driver, retries=5, base_retry_delay=15,
                       missing_link_retries=3, missing_link_delay=5):
     """
-    Finds and clicks the "Next" pagination link via JavaScript so navigation
-    carries a natural Referer header and isn't blocked by overlapping page
-    elements that would intercept a native mouse click. Retries
-    on transient WebDriver command failures.
+    Find and click the "Next" pagination link via JavaScript so
+    navigation carries a natural Referer header and isn't blocked by
+    overlapping page elements that would intercept a native mouse
+    click. Retries on transient WebDriver command failures.
 
     Not finding the "Next" link is retried with a short wait and a page
-    refresh up to {missing_link_retries} times in case the page has not loaded yet.
+    refresh up to missing_link_retries times in case the page has not
+    loaded yet.
 
-    Returns the resulting page's URL, or None if no next page exists after
-    exhausting missing_link_retries.
+    :param driver: The active Selenium Chrome driver.
+    :type driver: selenium.webdriver.Chrome
+    :param retries: How many times to retry on a WebDriver failure.
+    :type retries: int
+    :param base_retry_delay: Base delay in seconds between retries,
+        doubled on each subsequent attempt.
+    :type base_retry_delay: int
+    :param missing_link_retries: How many times to retry when the
+        "Next" link isn't found yet.
+    :type missing_link_retries: int
+    :param missing_link_delay: Base delay in seconds between missing-
+        link retries, doubled on each subsequent attempt.
+    :type missing_link_delay: int
+    :returns: The resulting page's URL, or None if no next page exists
+        after exhausting missing_link_retries.
+    :rtype: str or None
     """
     for attempt in range(1, retries + 1):
         try:
@@ -339,12 +433,18 @@ def _click_next_page(driver, retries=5, base_retry_delay=15,
 
 def scrape_data(driver, url=None):
     """
-    Scrapes admissions results from the page at `url`, or from whatever page
-    is currently loaded if url is None. Clicks "Next" afterward so the
-    following page's request carries a natural Referer.
-    Returns list of Tag objects, each being a row with application details,
-    and the next page's URL (for resumable state), or None if no next page
-    exists.
+    Scrape admissions results from the page at `url`, or from whatever
+    page is currently loaded if url is None. Clicks "Next" afterward so
+    the following page's request carries a natural Referer.
+
+    :param driver: The active Selenium Chrome driver.
+    :type driver: selenium.webdriver.Chrome
+    :param url: The URL to navigate to, or None to use the current page.
+    :type url: str or None
+    :returns: A list of Tag objects, each being a row with application
+        details, and the next page's URL (for resumable state), or None
+        if no next page exists.
+    :rtype: tuple(list[bs4.Tag], str or None)
     """
     soup = _get_page(driver, url)
     table = soup.find("tbody")
@@ -356,7 +456,13 @@ def scrape_data(driver, url=None):
 
 def format_duration(seconds):
     """
-    Converts seconds to hours, minutes, seconds for loop/script execution.
+    Convert seconds to hours, minutes, seconds for loop/script
+    execution.
+
+    :param seconds: The duration to format.
+    :type seconds: float
+    :returns: The formatted duration.
+    :rtype: str
     """
     hours, remainder = divmod(int(seconds), 3600)
     minutes, secs = divmod(remainder, 60)
@@ -371,7 +477,11 @@ def format_duration(seconds):
 
 def parse_args():
     """
-    Parses CLI arguments for scraping GradCafe admissions results directly.
+    Parse CLI arguments for scraping GradCafe admissions results
+    directly.
+
+    :returns: Parsed arguments.
+    :rtype: argparse.Namespace
     """
     parser = argparse.ArgumentParser(
         description="Scrape GradCafe admissions results into a JSON file."
@@ -400,7 +510,7 @@ def parse_args():
 
 def run_scrape(args):
     """
-    Scrapes GradCafe admissions results into a JSON file.
+    Scrape GradCafe admissions results into a JSON file.
 
     With --num_results, resumes from saved pagination state and stops at
     that many total results (or when there are no more pages).
@@ -413,7 +523,11 @@ def run_scrape(args):
     data), when there are no more pages, or when this process receives
     SIGTERM (as sent by Flask's Cancel button), whichever comes first.
     Whatever was already saved before stopping stays saved either way.
-    Returns none.
+
+    :param args: Parsed CLI arguments, as returned by parse_args().
+    :type args: argparse.Namespace
+    :returns: None.
+    :rtype: None
     """
     signal.signal(signal.SIGTERM, _handle_sigterm)
 

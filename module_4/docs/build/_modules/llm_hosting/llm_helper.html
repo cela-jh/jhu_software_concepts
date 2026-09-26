@@ -1,0 +1,434 @@
+
+
+<!DOCTYPE html>
+<html class="writer-html5" lang="en" data-content_root="../../">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>llm_hosting.llm_helper &mdash; GradCafe Analytics 1.0 documentation</title>
+      <link rel="stylesheet" type="text/css" href="../../_static/pygments.css?v=b86133f3" />
+      <link rel="stylesheet" type="text/css" href="../../_static/css/theme.css?v=9edc463e" />
+
+  
+      <script src="../../_static/jquery.js?v=5d32c60e"></script>
+      <script src="../../_static/_sphinx_javascript_frameworks_compat.js?v=2cd50e6c"></script>
+      <script src="../../_static/documentation_options.js?v=f2a433a1"></script>
+      <script src="../../_static/doctools.js?v=fd6eb6e6"></script>
+      <script src="../../_static/sphinx_highlight.js?v=6ffebe34"></script>
+    <script src="../../_static/js/theme.js"></script>
+    <link rel="index" title="Index" href="../../genindex.html" />
+    <link rel="search" title="Search" href="../../search.html" /> 
+</head>
+
+<body class="wy-body-for-nav"> 
+  <div class="wy-grid-for-nav">
+    <nav data-toggle="wy-nav-shift" class="wy-nav-side">
+      <div class="wy-side-scroll">
+        <div class="wy-side-nav-search" >
+
+          
+          
+          <a href="../../index.html" class="icon icon-home">
+            GradCafe Analytics
+          </a>
+<div role="search">
+  <form id="rtd-search-form" class="wy-form" action="../../search.html" method="get">
+    <input type="text" name="q" placeholder="Search docs" aria-label="Search docs" />
+    <input type="hidden" name="check_keywords" value="yes" />
+    <input type="hidden" name="area" value="default" />
+  </form>
+</div>
+        </div><div class="wy-menu wy-menu-vertical" data-spy="affix" role="navigation" aria-label="Navigation menu">
+              <p class="caption" role="heading"><span class="caption-text">Contents:</span></p>
+<ul>
+<li class="toctree-l1"><a class="reference internal" href="../../overview_setup.html">Overview &amp; Setup</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../architecture.html">Architecture</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../modules/modules.html">API Reference</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../testing_guide.html">Testing Guide</a></li>
+</ul>
+
+        </div>
+      </div>
+    </nav>
+
+    <section data-toggle="wy-nav-shift" class="wy-nav-content-wrap"><nav class="wy-nav-top" aria-label="Mobile navigation menu" >
+          <i data-toggle="wy-nav-top" class="fa fa-bars"></i>
+          <a href="../../index.html">GradCafe Analytics</a>
+      </nav>
+
+      <div class="wy-nav-content">
+        <div class="rst-content">
+          <div role="navigation" aria-label="Page navigation">
+  <ul class="wy-breadcrumbs">
+      <li><a href="../../index.html" class="icon icon-home" aria-label="Home"></a></li>
+          <li class="breadcrumb-item"><a href="../index.html">Module code</a></li>
+      <li class="breadcrumb-item active">llm_hosting.llm_helper</li>
+      <li class="wy-breadcrumbs-aside">
+      </li>
+  </ul>
+  <hr/>
+</div>
+          <div role="main" class="document" itemscope="itemscope" itemtype="http://schema.org/Article">
+           <div itemprop="articleBody">
+             
+  <h1>Source code for llm_hosting.llm_helper</h1><div class="highlight"><pre>
+<span></span><span class="sd">"""</span>
+<span class="sd">`llm_helper.py`</span>
+<span class="sd">General-purpose helper functions supporting the LLM standardizer (`app.py`):</span>
+<span class="sd">running it in parallel across multiple worker processes, with crash/interrupt-safe</span>
+<span class="sd">resume based on each row's unique `url`.</span>
+<span class="sd">"""</span>
+
+<span class="kn">import</span><span class="w"> </span><span class="nn">json</span>
+<span class="kn">import</span><span class="w"> </span><span class="nn">os</span>
+<span class="kn">import</span><span class="w"> </span><span class="nn">subprocess</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">pathlib</span><span class="w"> </span><span class="kn">import</span> <span class="n">Path</span>
+
+<span class="n">WORK_DIR</span> <span class="o">=</span> <span class="n">Path</span><span class="p">(</span><span class="vm">__file__</span><span class="p">)</span><span class="o">.</span><span class="n">parent</span>
+
+<span class="c1"># Holds transient per-worker files only. chunk_&lt;i&gt;.json is a worker's input</span>
+<span class="c1"># slice, a copy of rows still needing processing. chunk_&lt;i&gt;.jsonl is that</span>
+<span class="c1"># worker's incremental JSON Lines output, flushed to disk after every row.</span>
+<span class="c1"># Neither the input file nor the final output file is ever written here.</span>
+<span class="c1"># This directory is consulted on every run, so rows already written to a</span>
+<span class="c1"># chunk's .jsonl file from a run that crashed or was interrupted before</span>
+<span class="c1"># merging are never reprocessed. Chunk files are deleted one at a time,</span>
+<span class="c1"># only after their rows have been safely merged into the real output file.</span>
+<span class="n">STATE_DIR</span> <span class="o">=</span> <span class="n">WORK_DIR</span> <span class="o">/</span> <span class="s2">".llm_state"</span>
+
+
+<span class="k">def</span><span class="w"> </span><span class="nf">_read_jsonl</span><span class="p">(</span><span class="n">path</span><span class="p">):</span>
+<span class="w">    </span><span class="sd">"""</span>
+<span class="sd">    Read a JSON Lines file.</span>
+
+<span class="sd">    :param path: Path to the JSON Lines file.</span>
+<span class="sd">    :type path: str or pathlib.Path</span>
+<span class="sd">    :returns: The parsed row dicts.</span>
+<span class="sd">    :rtype: list[dict]</span>
+<span class="sd">    """</span>
+    <span class="n">rows</span> <span class="o">=</span> <span class="p">[]</span>
+    <span class="k">with</span> <span class="nb">open</span><span class="p">(</span><span class="n">path</span><span class="p">)</span> <span class="k">as</span> <span class="n">f</span><span class="p">:</span>
+        <span class="k">for</span> <span class="n">line</span> <span class="ow">in</span> <span class="n">f</span><span class="p">:</span>
+            <span class="n">line</span> <span class="o">=</span> <span class="n">line</span><span class="o">.</span><span class="n">strip</span><span class="p">()</span>
+            <span class="k">if</span> <span class="n">line</span><span class="p">:</span>
+                <span class="n">rows</span><span class="o">.</span><span class="n">append</span><span class="p">(</span><span class="n">json</span><span class="o">.</span><span class="n">loads</span><span class="p">(</span><span class="n">line</span><span class="p">))</span>
+    <span class="k">return</span> <span class="n">rows</span>
+
+
+<span class="k">def</span><span class="w"> </span><span class="nf">_safe_write_json</span><span class="p">(</span><span class="n">rows</span><span class="p">,</span> <span class="n">output_path</span><span class="p">):</span>
+<span class="w">    </span><span class="sd">"""</span>
+<span class="sd">    Write rows to output_path as a pretty-printed JSON array. Refuses to</span>
+<span class="sd">    overwrite an existing, larger result with a smaller or empty one,</span>
+<span class="sd">    raising instead. Writes via a temp file and an atomic rename, so a</span>
+<span class="sd">    crash mid-write can never leave a truncated or corrupted file in its</span>
+<span class="sd">    place.</span>
+
+<span class="sd">    :param rows: The rows to write.</span>
+<span class="sd">    :type rows: list[dict]</span>
+<span class="sd">    :param output_path: Path to write the JSON array to.</span>
+<span class="sd">    :type output_path: str or pathlib.Path</span>
+<span class="sd">    :raises RuntimeError: If output_path already holds more rows than</span>
+<span class="sd">        are being written.</span>
+<span class="sd">    :returns: None.</span>
+<span class="sd">    :rtype: None</span>
+<span class="sd">    """</span>
+    <span class="n">output_path</span> <span class="o">=</span> <span class="n">Path</span><span class="p">(</span><span class="n">output_path</span><span class="p">)</span>
+    <span class="k">if</span> <span class="n">output_path</span><span class="o">.</span><span class="n">is_file</span><span class="p">():</span>
+        <span class="k">try</span><span class="p">:</span>
+            <span class="n">existing</span> <span class="o">=</span> <span class="n">json</span><span class="o">.</span><span class="n">loads</span><span class="p">(</span><span class="n">output_path</span><span class="o">.</span><span class="n">read_text</span><span class="p">())</span>
+        <span class="k">except</span> <span class="p">(</span><span class="n">json</span><span class="o">.</span><span class="n">JSONDecodeError</span><span class="p">,</span> <span class="ne">OSError</span><span class="p">):</span>
+            <span class="n">existing</span> <span class="o">=</span> <span class="p">[]</span>
+        <span class="k">if</span> <span class="nb">isinstance</span><span class="p">(</span><span class="n">existing</span><span class="p">,</span> <span class="nb">list</span><span class="p">)</span> <span class="ow">and</span> <span class="nb">len</span><span class="p">(</span><span class="n">rows</span><span class="p">)</span> <span class="o">&lt;</span> <span class="nb">len</span><span class="p">(</span><span class="n">existing</span><span class="p">):</span>
+            <span class="k">raise</span> <span class="ne">RuntimeError</span><span class="p">(</span>
+                <span class="sa">f</span><span class="s2">"Refusing to overwrite </span><span class="si">{</span><span class="n">output_path</span><span class="si">}</span><span class="s2"> (</span><span class="si">{</span><span class="nb">len</span><span class="p">(</span><span class="n">existing</span><span class="p">)</span><span class="si">}</span><span class="s2"> rows) with "</span>
+                <span class="sa">f</span><span class="s2">"a smaller result (</span><span class="si">{</span><span class="nb">len</span><span class="p">(</span><span class="n">rows</span><span class="p">)</span><span class="si">}</span><span class="s2"> rows). Investigate before retrying."</span>
+            <span class="p">)</span>
+
+    <span class="n">tmp_path</span> <span class="o">=</span> <span class="n">output_path</span><span class="o">.</span><span class="n">with_suffix</span><span class="p">(</span><span class="n">output_path</span><span class="o">.</span><span class="n">suffix</span> <span class="o">+</span> <span class="s2">".tmp"</span><span class="p">)</span>
+    <span class="k">with</span> <span class="nb">open</span><span class="p">(</span><span class="n">tmp_path</span><span class="p">,</span> <span class="s2">"w"</span><span class="p">)</span> <span class="k">as</span> <span class="n">f</span><span class="p">:</span>
+        <span class="n">json</span><span class="o">.</span><span class="n">dump</span><span class="p">(</span><span class="n">rows</span><span class="p">,</span> <span class="n">f</span><span class="p">,</span> <span class="n">indent</span><span class="o">=</span><span class="mi">2</span><span class="p">)</span>
+    <span class="n">os</span><span class="o">.</span><span class="n">replace</span><span class="p">(</span><span class="n">tmp_path</span><span class="p">,</span> <span class="n">output_path</span><span class="p">)</span>
+
+
+<div class="viewcode-block" id="jsonl_to_json">
+<a class="viewcode-back" href="../../modules/llm_hosting.llm_helper.html#llm_hosting.llm_helper.jsonl_to_json">[docs]</a>
+<span class="k">def</span><span class="w"> </span><span class="nf">jsonl_to_json</span><span class="p">(</span><span class="n">jsonl_path</span><span class="p">,</span> <span class="n">json_path</span><span class="p">):</span>
+<span class="w">    </span><span class="sd">"""</span>
+<span class="sd">    Convert a JSON Lines file into a single JSON array file.</span>
+
+<span class="sd">    :param jsonl_path: Path to the source JSON Lines file.</span>
+<span class="sd">    :type jsonl_path: str or pathlib.Path</span>
+<span class="sd">    :param json_path: Path to write the JSON array file to.</span>
+<span class="sd">    :type json_path: str or pathlib.Path</span>
+<span class="sd">    :returns: None.</span>
+<span class="sd">    :rtype: None</span>
+<span class="sd">    """</span>
+    <span class="n">rows</span> <span class="o">=</span> <span class="n">_read_jsonl</span><span class="p">(</span><span class="n">jsonl_path</span><span class="p">)</span>
+    <span class="k">with</span> <span class="nb">open</span><span class="p">(</span><span class="n">json_path</span><span class="p">,</span> <span class="s2">"w"</span><span class="p">)</span> <span class="k">as</span> <span class="n">f</span><span class="p">:</span>
+        <span class="n">json</span><span class="o">.</span><span class="n">dump</span><span class="p">(</span><span class="n">rows</span><span class="p">,</span> <span class="n">f</span><span class="p">,</span> <span class="n">indent</span><span class="o">=</span><span class="mi">2</span><span class="p">)</span></div>
+
+
+
+<span class="k">def</span><span class="w"> </span><span class="nf">_load_completed</span><span class="p">(</span><span class="n">output_path</span><span class="p">,</span> <span class="n">key</span><span class="p">):</span>
+<span class="w">    </span><span class="sd">"""</span>
+<span class="sd">    Gather every row already known to be done, keyed by `key`, typically</span>
+<span class="sd">    "url". Includes rows already merged into output_path, plus rows</span>
+<span class="sd">    sitting in any leftover chunk_*.jsonl file in STATE_DIR from a</span>
+<span class="sd">    prior run that crashed or was interrupted before its results were</span>
+<span class="sd">    merged.</span>
+
+<span class="sd">    :param output_path: Path to the merged JSON output file.</span>
+<span class="sd">    :type output_path: str or pathlib.Path</span>
+<span class="sd">    :param key: The row field used as the unique identifier.</span>
+<span class="sd">    :type key: str</span>
+<span class="sd">    :returns: A dict mapping each key value to its row.</span>
+<span class="sd">    :rtype: dict</span>
+<span class="sd">    """</span>
+    <span class="n">completed</span> <span class="o">=</span> <span class="p">{}</span>
+
+    <span class="n">output_path</span> <span class="o">=</span> <span class="n">Path</span><span class="p">(</span><span class="n">output_path</span><span class="p">)</span>
+    <span class="k">if</span> <span class="n">output_path</span><span class="o">.</span><span class="n">is_file</span><span class="p">():</span>
+        <span class="k">try</span><span class="p">:</span>
+            <span class="n">existing</span> <span class="o">=</span> <span class="n">json</span><span class="o">.</span><span class="n">loads</span><span class="p">(</span><span class="n">output_path</span><span class="o">.</span><span class="n">read_text</span><span class="p">())</span>
+        <span class="k">except</span> <span class="p">(</span><span class="n">json</span><span class="o">.</span><span class="n">JSONDecodeError</span><span class="p">,</span> <span class="ne">OSError</span><span class="p">):</span>
+            <span class="n">existing</span> <span class="o">=</span> <span class="p">[]</span>
+        <span class="k">for</span> <span class="n">row</span> <span class="ow">in</span> <span class="n">existing</span> <span class="k">if</span> <span class="nb">isinstance</span><span class="p">(</span><span class="n">existing</span><span class="p">,</span> <span class="nb">list</span><span class="p">)</span> <span class="k">else</span> <span class="p">[]:</span>
+            <span class="n">k</span> <span class="o">=</span> <span class="n">row</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="n">key</span><span class="p">)</span>
+            <span class="k">if</span> <span class="n">k</span> <span class="ow">is</span> <span class="ow">not</span> <span class="kc">None</span><span class="p">:</span>
+                <span class="n">completed</span><span class="p">[</span><span class="n">k</span><span class="p">]</span> <span class="o">=</span> <span class="n">row</span>
+
+    <span class="k">if</span> <span class="n">STATE_DIR</span><span class="o">.</span><span class="n">is_dir</span><span class="p">():</span>
+        <span class="k">for</span> <span class="n">chunk_path</span> <span class="ow">in</span> <span class="nb">sorted</span><span class="p">(</span><span class="n">STATE_DIR</span><span class="o">.</span><span class="n">glob</span><span class="p">(</span><span class="s2">"chunk_*.jsonl"</span><span class="p">)):</span>
+            <span class="k">for</span> <span class="n">row</span> <span class="ow">in</span> <span class="n">_read_jsonl</span><span class="p">(</span><span class="n">chunk_path</span><span class="p">):</span>
+                <span class="n">k</span> <span class="o">=</span> <span class="n">row</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="n">key</span><span class="p">)</span>
+                <span class="k">if</span> <span class="n">k</span> <span class="ow">is</span> <span class="ow">not</span> <span class="kc">None</span><span class="p">:</span>
+                    <span class="n">completed</span><span class="p">[</span><span class="n">k</span><span class="p">]</span> <span class="o">=</span> <span class="n">row</span>
+
+    <span class="k">return</span> <span class="n">completed</span>
+
+
+<span class="k">def</span><span class="w"> </span><span class="nf">_merge_and_write</span><span class="p">(</span><span class="n">output_path</span><span class="p">,</span> <span class="n">key</span><span class="p">):</span>
+<span class="w">    </span><span class="sd">"""</span>
+<span class="sd">    Recompute the completed set from output_path and STATE_DIR chunk</span>
+<span class="sd">    files, then atomically write it to output_path.</span>
+
+<span class="sd">    :param output_path: Path to the merged JSON output file.</span>
+<span class="sd">    :type output_path: str or pathlib.Path</span>
+<span class="sd">    :param key: The row field used as the unique identifier.</span>
+<span class="sd">    :type key: str</span>
+<span class="sd">    :returns: The merged row count.</span>
+<span class="sd">    :rtype: int</span>
+<span class="sd">    """</span>
+    <span class="n">completed</span> <span class="o">=</span> <span class="n">_load_completed</span><span class="p">(</span><span class="n">output_path</span><span class="p">,</span> <span class="n">key</span><span class="p">)</span>
+    <span class="n">_safe_write_json</span><span class="p">(</span><span class="nb">list</span><span class="p">(</span><span class="n">completed</span><span class="o">.</span><span class="n">values</span><span class="p">()),</span> <span class="n">output_path</span><span class="p">)</span>
+    <span class="k">return</span> <span class="nb">len</span><span class="p">(</span><span class="n">completed</span><span class="p">)</span>
+
+
+<div class="viewcode-block" id="run_parallel">
+<a class="viewcode-back" href="../../modules/llm_hosting.llm_helper.html#llm_hosting.llm_helper.run_parallel">[docs]</a>
+<span class="k">def</span><span class="w"> </span><span class="nf">run_parallel</span><span class="p">(</span><span class="n">input_path</span><span class="p">,</span> <span class="n">output_path</span><span class="p">,</span> <span class="n">n_workers</span><span class="o">=</span><span class="mi">4</span><span class="p">,</span> <span class="n">n_threads</span><span class="o">=</span><span class="mi">1</span><span class="p">,</span> <span class="n">key</span><span class="o">=</span><span class="s2">"url"</span><span class="p">):</span>
+<span class="w">    </span><span class="sd">"""</span>
+<span class="sd">    Read input_path and standardize every row not already present by url</span>
+<span class="sd">    in output_path or in a leftover chunk_*.jsonl state file. Splits the</span>
+<span class="sd">    remaining rows across n_workers app.py subprocesses, each writing its</span>
+<span class="sd">    own chunk_&lt;i&gt;.jsonl in STATE_DIR incrementally.</span>
+
+<span class="sd">    Workers default to GPU offload through Metal rather than CPU-only.</span>
+<span class="sd">    Benchmarking on this machine found GPU offload runs roughly 35 times</span>
+<span class="sd">    faster per call than single-threaded CPU, and aggregate throughput</span>
+<span class="sd">    across concurrent workers saturates around 4 workers. Going wider than</span>
+<span class="sd">    that adds queueing latency per call without further aggregate gain,</span>
+<span class="sd">    unlike the CPU-only path, where more workers scales roughly linearly.</span>
+<span class="sd">    Set N_GPU_LAYERS=0 in the calling environment to force CPU-only workers</span>
+<span class="sd">    instead, such as on a machine without a usable GPU backend.</span>
+
+<span class="sd">    Safe to interrupt with Ctrl+C or to kill. On interrupt, already-running</span>
+<span class="sd">    workers are asked to terminate, then whatever they wrote is merged into</span>
+<span class="sd">    output_path before returning, so re-running this function with the same</span>
+<span class="sd">    arguments picks up exactly where it left off. Never deletes or writes</span>
+<span class="sd">    to input_path. Never deletes output_path, only atomically replaces it</span>
+<span class="sd">    with a merged version that is never smaller. STATE_DIR chunk files are</span>
+<span class="sd">    deleted only after their rows are confirmed merged into output_path.</span>
+
+<span class="sd">    :param input_path: Path to the JSON array of rows to standardize.</span>
+<span class="sd">    :type input_path: str or pathlib.Path</span>
+<span class="sd">    :param output_path: Path to write the merged, standardized JSON output.</span>
+<span class="sd">    :type output_path: str or pathlib.Path</span>
+<span class="sd">    :param n_workers: Number of parallel worker processes.</span>
+<span class="sd">    :type n_workers: int</span>
+<span class="sd">    :param n_threads: Threads per worker process.</span>
+<span class="sd">    :type n_threads: int</span>
+<span class="sd">    :param key: The row field used as the unique identifier for resume/dedup.</span>
+<span class="sd">    :type key: str</span>
+<span class="sd">    :raises FileNotFoundError: If input_path does not exist.</span>
+<span class="sd">    :raises ValueError: If input_path does not contain a JSON array of</span>
+<span class="sd">        row objects.</span>
+<span class="sd">    :returns: None.</span>
+<span class="sd">    :rtype: None</span>
+<span class="sd">    """</span>
+    <span class="n">input_path</span> <span class="o">=</span> <span class="n">Path</span><span class="p">(</span><span class="n">input_path</span><span class="p">)</span>
+    <span class="k">if</span> <span class="ow">not</span> <span class="n">input_path</span><span class="o">.</span><span class="n">is_file</span><span class="p">():</span>
+        <span class="k">raise</span> <span class="ne">FileNotFoundError</span><span class="p">(</span>
+            <span class="sa">f</span><span class="s2">"Input file </span><span class="si">{</span><span class="n">input_path</span><span class="si">}</span><span class="s2"> does not exist. Check the path and try again."</span>
+        <span class="p">)</span>
+
+    <span class="kn">from</span><span class="w"> </span><span class="nn">app</span><span class="w"> </span><span class="kn">import</span> <span class="n">_get_model_path</span>
+    <span class="n">_get_model_path</span><span class="p">()</span>  <span class="c1"># download once before workers race on it</span>
+
+    <span class="n">STATE_DIR</span><span class="o">.</span><span class="n">mkdir</span><span class="p">(</span><span class="n">exist_ok</span><span class="o">=</span><span class="kc">True</span><span class="p">)</span>
+
+    <span class="k">with</span> <span class="nb">open</span><span class="p">(</span><span class="n">input_path</span><span class="p">)</span> <span class="k">as</span> <span class="n">f</span><span class="p">:</span>
+        <span class="n">rows</span> <span class="o">=</span> <span class="n">json</span><span class="o">.</span><span class="n">load</span><span class="p">(</span><span class="n">f</span><span class="p">)</span>
+    <span class="k">if</span> <span class="ow">not</span> <span class="nb">isinstance</span><span class="p">(</span><span class="n">rows</span><span class="p">,</span> <span class="nb">list</span><span class="p">)</span> <span class="ow">or</span> <span class="ow">not</span> <span class="nb">all</span><span class="p">(</span><span class="nb">isinstance</span><span class="p">(</span><span class="n">r</span><span class="p">,</span> <span class="nb">dict</span><span class="p">)</span> <span class="k">for</span> <span class="n">r</span> <span class="ow">in</span> <span class="n">rows</span><span class="p">):</span>
+        <span class="k">raise</span> <span class="ne">ValueError</span><span class="p">(</span>
+            <span class="sa">f</span><span class="s2">"</span><span class="si">{</span><span class="n">input_path</span><span class="si">}</span><span class="s2"> must contain a JSON array of row objects. "</span>
+            <span class="s2">"Check that the file was produced by the scraper and was not truncated."</span>
+        <span class="p">)</span>
+
+    <span class="n">completed</span> <span class="o">=</span> <span class="n">_load_completed</span><span class="p">(</span><span class="n">output_path</span><span class="p">,</span> <span class="n">key</span><span class="p">)</span>
+    <span class="n">remaining</span> <span class="o">=</span> <span class="p">[</span><span class="n">r</span> <span class="k">for</span> <span class="n">r</span> <span class="ow">in</span> <span class="n">rows</span> <span class="k">if</span> <span class="n">r</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="n">key</span><span class="p">)</span> <span class="ow">not</span> <span class="ow">in</span> <span class="n">completed</span><span class="p">]</span>
+
+    <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">"</span><span class="si">{</span><span class="nb">len</span><span class="p">(</span><span class="n">completed</span><span class="p">)</span><span class="si">}</span><span class="s2"> rows already completed, </span><span class="si">{</span><span class="nb">len</span><span class="p">(</span><span class="n">remaining</span><span class="p">)</span><span class="si">}</span><span class="s2"> remaining "</span>
+          <span class="sa">f</span><span class="s2">"-&gt; splitting across </span><span class="si">{</span><span class="n">n_workers</span><span class="si">}</span><span class="s2"> workers"</span><span class="p">)</span>
+
+    <span class="k">if</span> <span class="ow">not</span> <span class="n">remaining</span><span class="p">:</span>
+        <span class="n">_merge_and_write</span><span class="p">(</span><span class="n">output_path</span><span class="p">,</span> <span class="n">key</span><span class="p">)</span>
+        <span class="k">return</span>
+
+    <span class="n">chunk_size</span> <span class="o">=</span> <span class="o">-</span><span class="p">(</span><span class="o">-</span><span class="nb">len</span><span class="p">(</span><span class="n">remaining</span><span class="p">)</span> <span class="o">//</span> <span class="n">n_workers</span><span class="p">)</span>  <span class="c1"># ceiling division</span>
+    <span class="n">chunks</span> <span class="o">=</span> <span class="p">[</span><span class="n">remaining</span><span class="p">[</span><span class="n">i</span><span class="p">:</span><span class="n">i</span> <span class="o">+</span> <span class="n">chunk_size</span><span class="p">]</span> <span class="k">for</span> <span class="n">i</span> <span class="ow">in</span> <span class="nb">range</span><span class="p">(</span><span class="mi">0</span><span class="p">,</span> <span class="nb">len</span><span class="p">(</span><span class="n">remaining</span><span class="p">),</span> <span class="n">chunk_size</span><span class="p">)]</span>
+
+    <span class="c1"># Fresh, collision-free names each run so a chunk file left behind by a</span>
+    <span class="c1"># prior interrupted run is never overwritten before it has been folded</span>
+    <span class="c1"># into `completed` above.</span>
+    <span class="n">run_id</span> <span class="o">=</span> <span class="mi">0</span>
+    <span class="k">while</span> <span class="nb">list</span><span class="p">(</span><span class="n">STATE_DIR</span><span class="o">.</span><span class="n">glob</span><span class="p">(</span><span class="sa">f</span><span class="s2">"chunk_</span><span class="si">{</span><span class="n">run_id</span><span class="si">}</span><span class="s2">_*.json*"</span><span class="p">)):</span>
+        <span class="n">run_id</span> <span class="o">+=</span> <span class="mi">1</span>
+
+    <span class="n">procs</span> <span class="o">=</span> <span class="p">[]</span>  <span class="c1"># (chunk_index, Popen) pairs</span>
+    <span class="n">env</span> <span class="o">=</span> <span class="p">{</span>
+        <span class="o">**</span><span class="n">os</span><span class="o">.</span><span class="n">environ</span><span class="p">,</span>
+        <span class="s2">"N_THREADS"</span><span class="p">:</span> <span class="nb">str</span><span class="p">(</span><span class="n">n_threads</span><span class="p">),</span>
+        <span class="s2">"VECLIB_MAXIMUM_THREADS"</span><span class="p">:</span> <span class="nb">str</span><span class="p">(</span><span class="n">n_threads</span><span class="p">),</span>  <span class="c1"># macOS Accelerate/vecLib backend</span>
+        <span class="s2">"OMP_NUM_THREADS"</span><span class="p">:</span> <span class="nb">str</span><span class="p">(</span><span class="n">n_threads</span><span class="p">),</span>
+        <span class="s2">"OPENBLAS_NUM_THREADS"</span><span class="p">:</span> <span class="nb">str</span><span class="p">(</span><span class="n">n_threads</span><span class="p">),</span>
+        <span class="s2">"N_GPU_LAYERS"</span><span class="p">:</span> <span class="n">os</span><span class="o">.</span><span class="n">environ</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s2">"N_GPU_LAYERS"</span><span class="p">,</span> <span class="s2">"99"</span><span class="p">),</span>
+    <span class="p">}</span>
+
+    <span class="k">def</span><span class="w"> </span><span class="nf">_launch_all</span><span class="p">():</span>
+        <span class="k">for</span> <span class="n">i</span><span class="p">,</span> <span class="n">chunk</span> <span class="ow">in</span> <span class="nb">enumerate</span><span class="p">(</span><span class="n">chunks</span><span class="p">):</span>
+            <span class="n">chunk_in_path</span> <span class="o">=</span> <span class="n">STATE_DIR</span> <span class="o">/</span> <span class="sa">f</span><span class="s2">"chunk_</span><span class="si">{</span><span class="n">run_id</span><span class="si">}</span><span class="s2">_</span><span class="si">{</span><span class="n">i</span><span class="si">}</span><span class="s2">.json"</span>
+            <span class="n">chunk_out_path</span> <span class="o">=</span> <span class="n">STATE_DIR</span> <span class="o">/</span> <span class="sa">f</span><span class="s2">"chunk_</span><span class="si">{</span><span class="n">run_id</span><span class="si">}</span><span class="s2">_</span><span class="si">{</span><span class="n">i</span><span class="si">}</span><span class="s2">.jsonl"</span>
+            <span class="n">chunk_in_path</span><span class="o">.</span><span class="n">write_text</span><span class="p">(</span><span class="n">json</span><span class="o">.</span><span class="n">dumps</span><span class="p">(</span><span class="n">chunk</span><span class="p">))</span>
+            <span class="n">procs</span><span class="o">.</span><span class="n">append</span><span class="p">((</span><span class="n">i</span><span class="p">,</span> <span class="n">subprocess</span><span class="o">.</span><span class="n">Popen</span><span class="p">(</span>
+                <span class="p">[</span><span class="s2">"python"</span><span class="p">,</span> <span class="s2">"app.py"</span><span class="p">,</span> <span class="s2">"--file"</span><span class="p">,</span> <span class="nb">str</span><span class="p">(</span><span class="n">chunk_in_path</span><span class="p">),</span>
+                 <span class="s2">"--out"</span><span class="p">,</span> <span class="nb">str</span><span class="p">(</span><span class="n">chunk_out_path</span><span class="p">),</span> <span class="s2">"--append"</span><span class="p">],</span>
+                <span class="n">cwd</span><span class="o">=</span><span class="n">WORK_DIR</span><span class="p">,</span>
+                <span class="n">env</span><span class="o">=</span><span class="n">env</span><span class="p">,</span>
+            <span class="p">)))</span>
+
+    <span class="k">def</span><span class="w"> </span><span class="nf">_terminate_all</span><span class="p">():</span>
+        <span class="k">for</span> <span class="n">_</span><span class="p">,</span> <span class="n">p</span> <span class="ow">in</span> <span class="n">procs</span><span class="p">:</span>
+            <span class="k">if</span> <span class="n">p</span><span class="o">.</span><span class="n">poll</span><span class="p">()</span> <span class="ow">is</span> <span class="kc">None</span><span class="p">:</span>
+                <span class="n">p</span><span class="o">.</span><span class="n">terminate</span><span class="p">()</span>
+        <span class="k">for</span> <span class="n">_</span><span class="p">,</span> <span class="n">p</span> <span class="ow">in</span> <span class="n">procs</span><span class="p">:</span>
+            <span class="k">try</span><span class="p">:</span>
+                <span class="n">p</span><span class="o">.</span><span class="n">wait</span><span class="p">(</span><span class="n">timeout</span><span class="o">=</span><span class="mi">15</span><span class="p">)</span>
+            <span class="k">except</span> <span class="n">subprocess</span><span class="o">.</span><span class="n">TimeoutExpired</span><span class="p">:</span>
+                <span class="n">p</span><span class="o">.</span><span class="n">kill</span><span class="p">()</span>
+                <span class="n">p</span><span class="o">.</span><span class="n">wait</span><span class="p">()</span>
+
+    <span class="k">try</span><span class="p">:</span>
+        <span class="n">_launch_all</span><span class="p">()</span>
+        <span class="n">failed_chunks</span> <span class="o">=</span> <span class="p">[]</span>
+        <span class="k">for</span> <span class="n">i</span><span class="p">,</span> <span class="n">p</span> <span class="ow">in</span> <span class="n">procs</span><span class="p">:</span>
+            <span class="n">p</span><span class="o">.</span><span class="n">wait</span><span class="p">()</span>
+            <span class="k">if</span> <span class="n">p</span><span class="o">.</span><span class="n">returncode</span> <span class="o">!=</span> <span class="mi">0</span><span class="p">:</span>
+                <span class="n">failed_chunks</span><span class="o">.</span><span class="n">append</span><span class="p">(</span><span class="n">i</span><span class="p">)</span>
+    <span class="k">except</span> <span class="p">(</span><span class="ne">KeyboardInterrupt</span><span class="p">,</span> <span class="ne">SystemExit</span><span class="p">):</span>
+        <span class="nb">print</span><span class="p">(</span><span class="s2">"</span><span class="se">\n</span><span class="s2">Interrupted - stopping workers and saving progress so far..."</span><span class="p">)</span>
+        <span class="n">_terminate_all</span><span class="p">()</span>
+        <span class="n">merged_count</span> <span class="o">=</span> <span class="n">_merge_and_write</span><span class="p">(</span><span class="n">output_path</span><span class="p">,</span> <span class="n">key</span><span class="p">)</span>
+        <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">"Progress saved: </span><span class="si">{</span><span class="n">merged_count</span><span class="si">}</span><span class="s2"> rows total in </span><span class="si">{</span><span class="n">output_path</span><span class="si">}</span><span class="s2">. "</span>
+              <span class="sa">f</span><span class="s2">"Re-run with the same arguments to continue."</span><span class="p">)</span>
+        <span class="k">raise</span>
+
+    <span class="k">if</span> <span class="n">failed_chunks</span><span class="p">:</span>
+        <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">"Warning: </span><span class="si">{</span><span class="nb">len</span><span class="p">(</span><span class="n">failed_chunks</span><span class="p">)</span><span class="si">}</span><span class="s2"> of </span><span class="si">{</span><span class="nb">len</span><span class="p">(</span><span class="n">chunks</span><span class="p">)</span><span class="si">}</span><span class="s2"> chunks failed "</span>
+              <span class="sa">f</span><span class="s2">"(chunks </span><span class="si">{</span><span class="n">failed_chunks</span><span class="si">}</span><span class="s2">); their results may be incomplete. "</span>
+              <span class="sa">f</span><span class="s2">"Re-run to retry the missing rows."</span><span class="p">)</span>
+
+    <span class="n">merged_count</span> <span class="o">=</span> <span class="n">_merge_and_write</span><span class="p">(</span><span class="n">output_path</span><span class="p">,</span> <span class="n">key</span><span class="p">)</span>
+    <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">"Merged </span><span class="si">{</span><span class="n">merged_count</span><span class="si">}</span><span class="s2"> total rows into </span><span class="si">{</span><span class="n">output_path</span><span class="si">}</span><span class="s2">"</span><span class="p">)</span>
+
+    <span class="k">if</span> <span class="ow">not</span> <span class="n">failed_chunks</span><span class="p">:</span>
+        <span class="c1"># Everything in STATE_DIR is now folded into output_path, including</span>
+        <span class="c1"># leftovers from any earlier crashed or interrupted run, so all of</span>
+        <span class="c1"># it is safe to remove, not just this run's own chunk files.</span>
+        <span class="k">for</span> <span class="n">path</span> <span class="ow">in</span> <span class="n">STATE_DIR</span><span class="o">.</span><span class="n">glob</span><span class="p">(</span><span class="s2">"chunk_*"</span><span class="p">):</span>
+            <span class="n">path</span><span class="o">.</span><span class="n">unlink</span><span class="p">(</span><span class="n">missing_ok</span><span class="o">=</span><span class="kc">True</span><span class="p">)</span></div>
+
+
+
+<div class="viewcode-block" id="parse_args">
+<a class="viewcode-back" href="../../modules/llm_hosting.llm_helper.html#llm_hosting.llm_helper.parse_args">[docs]</a>
+<span class="k">def</span><span class="w"> </span><span class="nf">parse_args</span><span class="p">():</span>
+<span class="w">    </span><span class="sd">"""</span>
+<span class="sd">    Parse CLI arguments for running the parallel standardizer directly.</span>
+
+<span class="sd">    :returns: Parsed arguments.</span>
+<span class="sd">    :rtype: argparse.Namespace</span>
+<span class="sd">    """</span>
+    <span class="kn">import</span><span class="w"> </span><span class="nn">argparse</span>
+
+    <span class="n">parser</span> <span class="o">=</span> <span class="n">argparse</span><span class="o">.</span><span class="n">ArgumentParser</span><span class="p">(</span>
+        <span class="n">description</span><span class="o">=</span><span class="s2">"Run the LLM standardizer in parallel across multiple worker processes."</span>
+    <span class="p">)</span>
+    <span class="n">parser</span><span class="o">.</span><span class="n">add_argument</span><span class="p">(</span><span class="s2">"input_path"</span><span class="p">,</span> <span class="nb">type</span><span class="o">=</span><span class="n">Path</span><span class="p">,</span> <span class="n">help</span><span class="o">=</span><span class="s2">"Input JSON file (list of result rows)."</span><span class="p">)</span>
+    <span class="n">parser</span><span class="o">.</span><span class="n">add_argument</span><span class="p">(</span><span class="s2">"output_path"</span><span class="p">,</span> <span class="nb">type</span><span class="o">=</span><span class="n">Path</span><span class="p">,</span> <span class="n">help</span><span class="o">=</span><span class="s2">"Path to write the merged, standardized JSON output."</span><span class="p">)</span>
+    <span class="n">parser</span><span class="o">.</span><span class="n">add_argument</span><span class="p">(</span><span class="s2">"--n_workers"</span><span class="p">,</span> <span class="nb">type</span><span class="o">=</span><span class="nb">int</span><span class="p">,</span> <span class="n">default</span><span class="o">=</span><span class="mi">4</span><span class="p">,</span> <span class="n">help</span><span class="o">=</span><span class="s2">"Number of parallel worker processes (default: 4)."</span><span class="p">)</span>
+    <span class="n">parser</span><span class="o">.</span><span class="n">add_argument</span><span class="p">(</span><span class="s2">"--n_threads"</span><span class="p">,</span> <span class="nb">type</span><span class="o">=</span><span class="nb">int</span><span class="p">,</span> <span class="n">default</span><span class="o">=</span><span class="mi">1</span><span class="p">,</span> <span class="n">help</span><span class="o">=</span><span class="s2">"Threads per worker process (default: 1, to avoid CPU oversubscription)."</span><span class="p">)</span>
+    <span class="n">parser</span><span class="o">.</span><span class="n">add_argument</span><span class="p">(</span><span class="s2">"--key"</span><span class="p">,</span> <span class="n">default</span><span class="o">=</span><span class="s2">"url"</span><span class="p">,</span> <span class="n">help</span><span class="o">=</span><span class="s2">"Row field used as the unique identifier for resume/dedup (default: url)."</span><span class="p">)</span>
+    <span class="k">return</span> <span class="n">parser</span><span class="o">.</span><span class="n">parse_args</span><span class="p">()</span></div>
+
+
+
+<div class="viewcode-block" id="main">
+<a class="viewcode-back" href="../../modules/llm_hosting.llm_helper.html#llm_hosting.llm_helper.main">[docs]</a>
+<span class="k">def</span><span class="w"> </span><span class="nf">main</span><span class="p">(</span><span class="n">args</span><span class="p">):</span>
+    <span class="n">run_parallel</span><span class="p">(</span><span class="n">args</span><span class="o">.</span><span class="n">input_path</span><span class="p">,</span> <span class="n">args</span><span class="o">.</span><span class="n">output_path</span><span class="p">,</span> <span class="n">args</span><span class="o">.</span><span class="n">n_workers</span><span class="p">,</span> <span class="n">args</span><span class="o">.</span><span class="n">n_threads</span><span class="p">,</span> <span class="n">args</span><span class="o">.</span><span class="n">key</span><span class="p">)</span></div>
+
+
+
+<span class="k">if</span> <span class="vm">__name__</span> <span class="o">==</span> <span class="s2">"__main__"</span><span class="p">:</span>
+    <span class="n">main</span><span class="p">(</span><span class="n">parse_args</span><span class="p">())</span>
+</pre></div>
+
+           </div>
+          </div>
+          <footer>
+
+  <hr/>
+
+  <div role="contentinfo">
+    <p>&#169; Copyright 2026, Cameron Ela.</p>
+  </div>
+
+  Built with <a href="https://www.sphinx-doc.org/">Sphinx</a> using a
+    <a href="https://github.com/readthedocs/sphinx_rtd_theme">theme</a>
+    provided by <a href="https://readthedocs.org">Read the Docs</a>.
+   
+
+</footer>
+        </div>
+      </div>
+    </section>
+  </div>
+  <script>
+      jQuery(function () {
+          SphinxRtdTheme.Navigation.enable(true);
+      });
+  </script> 
+
+</body>
+</html>

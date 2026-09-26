@@ -42,7 +42,15 @@ JSON_OBJ_RE = re.compile(r"\{.*?\}", re.DOTALL)
 
 # ---------------- Canonical lists + abbrev maps ----------------
 def _read_lines(path: str) -> List[str]:
-    """Read non-empty, stripped lines from a file (UTF-8)."""
+    """
+    Read non-empty, stripped lines from a file (UTF-8).
+
+    :param path: Path to the file to read.
+    :type path: str
+    :returns: The non-empty, stripped lines, or an empty list if the
+        file doesn't exist.
+    :rtype: list[str]
+    """
     try:
         with open(path, "r", encoding="utf-8") as f:
             return [ln.strip() for ln in f if ln.strip()]
@@ -145,7 +153,12 @@ MODELS_DIR = Path(__file__).parent / "models"
 
 
 def _get_model_path() -> str:
-    """Downloads the GGUF file if not already present, otherwise reuses it."""
+    """
+    Download the GGUF file if not already present, otherwise reuse it.
+
+    :returns: Path to the local GGUF model file.
+    :rtype: str
+    """
     local_path = MODELS_DIR / MODEL_FILE
     if local_path.is_file():
         return str(local_path)
@@ -157,7 +170,12 @@ def _get_model_path() -> str:
 
 
 def _load_llm() -> Llama:
-    """Initialize llama.cpp using the (already downloaded) GGUF file."""
+    """
+    Initialize llama.cpp using the (already downloaded) GGUF file.
+
+    :returns: The loaded model, cached for reuse across calls.
+    :rtype: llama_cpp.Llama
+    """
     global _LLM
     if _LLM is not None:
         return _LLM
@@ -179,7 +197,14 @@ def _load_llm() -> Llama:
 
 
 def _split_fallback(text: str) -> Tuple[str, str]:
-    """Simple, rules-first parser if the model returns non-JSON."""
+    """
+    Simple, rules-first parser if the model returns non-JSON.
+
+    :param text: The raw text to split.
+    :type text: str
+    :returns: The (program, university) pair.
+    :rtype: tuple(str, str)
+    """
     s = re.sub(r"\s+", " ", (text or "")).strip().strip(",")
     parts = [p.strip() for p in re.split(r",| at | @ ", s) if p.strip()]
     prog = parts[0] if parts else ""
@@ -202,7 +227,18 @@ def _split_fallback(text: str) -> Tuple[str, str]:
 
 
 def _best_match(name: str, lower_map: Dict[str, str], cutoff: float) -> str | None:
-    """Fuzzy match a name against a lowercase-to-canonical map, case-insensitively."""
+    """
+    Fuzzy match a name against a lowercase-to-canonical map, case-insensitively.
+
+    :param name: The name to match.
+    :type name: str
+    :param lower_map: A mapping from lowercase names to canonical names.
+    :type lower_map: dict
+    :param cutoff: The minimum similarity ratio to accept a match.
+    :type cutoff: float
+    :returns: The canonical name of the best match, or None if none met cutoff.
+    :rtype: str or None
+    """
     if not name or not lower_map:
         return None
     matches = difflib.get_close_matches(name.lower(), lower_map.keys(), n=1, cutoff=cutoff)
@@ -210,7 +246,14 @@ def _best_match(name: str, lower_map: Dict[str, str], cutoff: float) -> str | No
 
 
 def _post_normalize_program(prog: str) -> str:
-    """Apply common fixes, title case, then canonical/fuzzy mapping."""
+    """
+    Apply common fixes, title case, then canonical/fuzzy mapping.
+
+    :param prog: The raw program name.
+    :type prog: str
+    :returns: The normalized program name.
+    :rtype: str
+    """
     p = (prog or "").strip()
     p = COMMON_PROG_FIXES.get(p, p)
     p = p.title()
@@ -222,7 +265,15 @@ def _post_normalize_program(prog: str) -> str:
 
 
 def _post_normalize_university(uni: str) -> str:
-    """Expand abbreviations, apply common fixes, capitalization, and canonical map."""
+    """
+    Expand abbreviations, apply common fixes, capitalization, and
+    canonical map.
+
+    :param uni: The raw university name.
+    :type uni: str
+    :returns: The normalized university name.
+    :rtype: str
+    """
     u = (uni or "").strip()
 
     # Abbreviations
@@ -247,7 +298,15 @@ def _post_normalize_university(uni: str) -> str:
 
 
 def _call_llm(program_text: str) -> Dict[str, str]:
-    """Query the tiny LLM and return standardized fields."""
+    """
+    Query the tiny LLM and return standardized fields.
+
+    :param program_text: The raw "program" field text to standardize.
+    :type program_text: str
+    :returns: A dict with `llm_generated_program` and
+        `llm_generated_university` keys.
+    :rtype: dict
+    """
     llm = _load_llm()
 
     messages = [{"role": "system", "content": SYSTEM_PROMPT}]
@@ -301,7 +360,15 @@ def _call_llm(program_text: str) -> Dict[str, str]:
 
 
 def _normalize_input(payload: Any) -> List[Dict[str, Any]]:
-    """Accept either a list of rows or {'rows': [...]}."""
+    """
+    Accept either a list of rows or {'rows': [...]}.
+
+    :param payload: The parsed request or file payload.
+    :type payload: object
+    :returns: The list of rows, or an empty list if payload matched
+        neither accepted shape.
+    :rtype: list[dict]
+    """
     if isinstance(payload, list):
         return payload
     if isinstance(payload, dict) and isinstance(payload.get("rows"), list):
@@ -311,13 +378,24 @@ def _normalize_input(payload: Any) -> List[Dict[str, Any]]:
 
 @app.get("/")
 def health() -> Any:
-    """Simple liveness check."""
+    """
+    Simple liveness check.
+
+    :returns: JSON ``{ok: True}``.
+    :rtype: flask.Response
+    """
     return jsonify({"ok": True})
 
 
 @app.post("/standardize")
 def standardize() -> Any:
-    """Standardize rows from an HTTP request and return JSON."""
+    """
+    Standardize rows from an HTTP request and return JSON.
+
+    :returns: JSON ``{rows: [...]}`` with `llm-generated-program` and
+        `llm-generated-university` added to each row.
+    :rtype: flask.Response
+    """
     payload = request.get_json(force=True, silent=True)
     rows = _normalize_input(payload)
 
@@ -333,7 +411,14 @@ def standardize() -> Any:
 
 
 def _format_duration(seconds: float) -> str:
-    """Render a seconds count as H:MM:SS (or M:SS under an hour)."""
+    """
+    Render a seconds count as H:MM:SS (or M:SS under an hour).
+
+    :param seconds: The duration to format.
+    :type seconds: float
+    :returns: The formatted duration.
+    :rtype: str
+    """
     seconds = max(0, int(round(seconds)))
     h, rem = divmod(seconds, 3600)
     m, s = divmod(rem, 60)
@@ -346,7 +431,21 @@ def _cli_process_file(
     append: bool,
     to_stdout: bool,
 ) -> None:
-    """Process a JSON file and write JSONL incrementally."""
+    """
+    Process a JSON file and write JSONL incrementally.
+
+    :param in_path: Path to the JSON input file.
+    :type in_path: str
+    :param out_path: Path to write JSON Lines output to, or None to
+        default to `<in_path>.jsonl` when not writing to stdout.
+    :type out_path: str or None
+    :param append: Whether to append to out_path instead of overwriting it.
+    :type append: bool
+    :param to_stdout: Whether to write JSON Lines to stdout instead of a file.
+    :type to_stdout: bool
+    :returns: None.
+    :rtype: None
+    """
     with open(in_path, "r", encoding="utf-8") as f:
         rows = _normalize_input(json.load(f))
 

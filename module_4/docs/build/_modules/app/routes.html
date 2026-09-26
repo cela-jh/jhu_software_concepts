@@ -1,0 +1,297 @@
+
+
+<!DOCTYPE html>
+<html class="writer-html5" lang="en" data-content_root="../../">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>app.routes &mdash; GradCafe Analytics 1.0 documentation</title>
+      <link rel="stylesheet" type="text/css" href="../../_static/pygments.css?v=b86133f3" />
+      <link rel="stylesheet" type="text/css" href="../../_static/css/theme.css?v=9edc463e" />
+
+  
+      <script src="../../_static/jquery.js?v=5d32c60e"></script>
+      <script src="../../_static/_sphinx_javascript_frameworks_compat.js?v=2cd50e6c"></script>
+      <script src="../../_static/documentation_options.js?v=f2a433a1"></script>
+      <script src="../../_static/doctools.js?v=fd6eb6e6"></script>
+      <script src="../../_static/sphinx_highlight.js?v=6ffebe34"></script>
+    <script src="../../_static/js/theme.js"></script>
+    <link rel="index" title="Index" href="../../genindex.html" />
+    <link rel="search" title="Search" href="../../search.html" /> 
+</head>
+
+<body class="wy-body-for-nav"> 
+  <div class="wy-grid-for-nav">
+    <nav data-toggle="wy-nav-shift" class="wy-nav-side">
+      <div class="wy-side-scroll">
+        <div class="wy-side-nav-search" >
+
+          
+          
+          <a href="../../index.html" class="icon icon-home">
+            GradCafe Analytics
+          </a>
+<div role="search">
+  <form id="rtd-search-form" class="wy-form" action="../../search.html" method="get">
+    <input type="text" name="q" placeholder="Search docs" aria-label="Search docs" />
+    <input type="hidden" name="check_keywords" value="yes" />
+    <input type="hidden" name="area" value="default" />
+  </form>
+</div>
+        </div><div class="wy-menu wy-menu-vertical" data-spy="affix" role="navigation" aria-label="Navigation menu">
+              <p class="caption" role="heading"><span class="caption-text">Contents:</span></p>
+<ul>
+<li class="toctree-l1"><a class="reference internal" href="../../overview_setup.html">Overview &amp; Setup</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../architecture.html">Architecture</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../modules/modules.html">API Reference</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../testing_guide.html">Testing Guide</a></li>
+</ul>
+
+        </div>
+      </div>
+    </nav>
+
+    <section data-toggle="wy-nav-shift" class="wy-nav-content-wrap"><nav class="wy-nav-top" aria-label="Mobile navigation menu" >
+          <i data-toggle="wy-nav-top" class="fa fa-bars"></i>
+          <a href="../../index.html">GradCafe Analytics</a>
+      </nav>
+
+      <div class="wy-nav-content">
+        <div class="rst-content">
+          <div role="navigation" aria-label="Page navigation">
+  <ul class="wy-breadcrumbs">
+      <li><a href="../../index.html" class="icon icon-home" aria-label="Home"></a></li>
+          <li class="breadcrumb-item"><a href="../index.html">Module code</a></li>
+          <li class="breadcrumb-item"><a href="../app.html">app</a></li>
+      <li class="breadcrumb-item active">app.routes</li>
+      <li class="wy-breadcrumbs-aside">
+      </li>
+  </ul>
+  <hr/>
+</div>
+          <div role="main" class="document" itemscope="itemscope" itemtype="http://schema.org/Article">
+           <div itemprop="articleBody">
+             
+  <h1>Source code for app.routes</h1><div class="highlight"><pre>
+<span></span><span class="sd">"""</span>
+<span class="sd">`routes.py`</span>
+<span class="sd">The analysis page route, and the Pull Data / Update Analysis endpoints</span>
+<span class="sd">behind its two buttons.</span>
+<span class="sd">"""</span>
+<span class="kn">import</span><span class="w"> </span><span class="nn">contextlib</span>
+<span class="kn">import</span><span class="w"> </span><span class="nn">io</span>
+<span class="kn">import</span><span class="w"> </span><span class="nn">os</span>
+
+<span class="kn">from</span><span class="w"> </span><span class="nn">flask</span><span class="w"> </span><span class="kn">import</span> <span class="n">Blueprint</span><span class="p">,</span> <span class="n">jsonify</span><span class="p">,</span> <span class="n">render_template</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">sqlalchemy.exc</span><span class="w"> </span><span class="kn">import</span> <span class="n">OperationalError</span>
+
+<span class="kn">from</span><span class="w"> </span><span class="nn">database.load_data</span><span class="w"> </span><span class="kn">import</span> <span class="n">load_data</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">database.models</span><span class="w"> </span><span class="kn">import</span> <span class="n">get_session</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">database.orm_queries</span><span class="w"> </span><span class="kn">import</span> <span class="n">ALL_ORM_ANSWERS</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">database.query_data</span><span class="w"> </span><span class="kn">import</span> <span class="n">QUESTION_QUERY</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">paths</span><span class="w"> </span><span class="kn">import</span> <span class="n">DEFAULT_DATA_FILE</span>
+
+<span class="kn">from</span><span class="w"> </span><span class="nn">.</span><span class="w"> </span><span class="kn">import</span> <span class="n">pull_control</span>
+
+<span class="n">bp</span> <span class="o">=</span> <span class="n">Blueprint</span><span class="p">(</span><span class="s2">"analysis"</span><span class="p">,</span> <span class="vm">__name__</span><span class="p">)</span>
+
+
+<span class="k">def</span><span class="w"> </span><span class="nf">_database_url</span><span class="p">():</span>
+<span class="w">    </span><span class="sd">"""</span>
+<span class="sd">    Return the DATABASE_URL environment variable, or None if unset.</span>
+
+<span class="sd">    :returns: The connection string, or None if it isn't set.</span>
+<span class="sd">    :rtype: str or None</span>
+<span class="sd">    """</span>
+    <span class="k">return</span> <span class="n">os</span><span class="o">.</span><span class="n">getenv</span><span class="p">(</span><span class="s2">"DATABASE_URL"</span><span class="p">)</span> <span class="ow">or</span> <span class="kc">None</span>
+
+
+<div class="viewcode-block" id="analysis">
+<a class="viewcode-back" href="../../modules/app.routes.html#app.routes.analysis">[docs]</a>
+<span class="nd">@bp</span><span class="o">.</span><span class="n">route</span><span class="p">(</span><span class="s2">"/analysis"</span><span class="p">)</span>
+<span class="k">def</span><span class="w"> </span><span class="nf">analysis</span><span class="p">():</span>
+<span class="w">    </span><span class="sd">"""</span>
+<span class="sd">    Run every Part 2 analysis question through the SQLAlchemy ORM and</span>
+<span class="sd">    render the results page, along with the Pull Data status so a page</span>
+<span class="sd">    reload during a pull still shows the Cancel button and its log.</span>
+
+<span class="sd">    :returns: The rendered analysis page; a plain 500 error message if</span>
+<span class="sd">        DATABASE_URL isn't set; or a plain, readable 503 "database</span>
+<span class="sd">        unavailable" message if PostgreSQL can't actually be reached</span>
+<span class="sd">        (e.g. it's down), rather than an unhandled 500.</span>
+<span class="sd">    :rtype: str or tuple(str, int)</span>
+<span class="sd">    """</span>
+    <span class="n">database_url</span> <span class="o">=</span> <span class="n">_database_url</span><span class="p">()</span>
+    <span class="k">if</span> <span class="n">database_url</span> <span class="ow">is</span> <span class="kc">None</span><span class="p">:</span>
+        <span class="k">return</span> <span class="p">(</span>
+            <span class="s2">"Set the DATABASE_URL environment variable before running "</span>
+            <span class="s2">"run.py, then restart the server."</span><span class="p">,</span>
+            <span class="mi">500</span><span class="p">,</span>
+        <span class="p">)</span>
+
+    <span class="n">session</span> <span class="o">=</span> <span class="n">get_session</span><span class="p">(</span><span class="n">database_url</span><span class="p">)</span>
+    <span class="k">try</span><span class="p">:</span>
+        <span class="n">questions</span> <span class="o">=</span> <span class="p">[</span><span class="n">question</span> <span class="k">for</span> <span class="n">question</span><span class="p">,</span> <span class="n">_</span><span class="p">,</span> <span class="n">_</span> <span class="ow">in</span> <span class="n">QUESTION_QUERY</span><span class="p">]</span>
+        <span class="n">answers</span> <span class="o">=</span> <span class="p">[</span><span class="n">answer_fn</span><span class="p">(</span><span class="n">session</span><span class="p">)</span> <span class="k">for</span> <span class="n">answer_fn</span> <span class="ow">in</span> <span class="n">ALL_ORM_ANSWERS</span><span class="p">]</span>
+    <span class="k">except</span> <span class="n">OperationalError</span><span class="p">:</span>
+        <span class="k">return</span> <span class="p">(</span>
+            <span class="s2">"The database is currently unavailable. Please check that "</span>
+            <span class="s2">"PostgreSQL is running and reachable, then try again."</span><span class="p">,</span>
+            <span class="mi">503</span><span class="p">,</span>
+        <span class="p">)</span>
+    <span class="k">finally</span><span class="p">:</span>
+        <span class="n">session</span><span class="o">.</span><span class="n">close</span><span class="p">()</span>
+
+    <span class="k">return</span> <span class="n">render_template</span><span class="p">(</span>
+        <span class="s2">"analysis.html"</span><span class="p">,</span>
+        <span class="n">results</span><span class="o">=</span><span class="nb">list</span><span class="p">(</span><span class="nb">zip</span><span class="p">(</span><span class="n">questions</span><span class="p">,</span> <span class="n">answers</span><span class="p">)),</span>
+        <span class="n">pull_running</span><span class="o">=</span><span class="n">pull_control</span><span class="o">.</span><span class="n">is_running</span><span class="p">(),</span>
+        <span class="n">pull_lines</span><span class="o">=</span><span class="n">pull_control</span><span class="o">.</span><span class="n">recent_lines</span><span class="p">(),</span>
+    <span class="p">)</span></div>
+
+
+
+<div class="viewcode-block" id="pull_start">
+<a class="viewcode-back" href="../../modules/app.routes.html#app.routes.pull_start">[docs]</a>
+<span class="nd">@bp</span><span class="o">.</span><span class="n">route</span><span class="p">(</span><span class="s2">"/pull-data"</span><span class="p">,</span> <span class="n">methods</span><span class="o">=</span><span class="p">[</span><span class="s2">"POST"</span><span class="p">])</span>
+<span class="k">def</span><span class="w"> </span><span class="nf">pull_start</span><span class="p">():</span>
+<span class="w">    </span><span class="sd">"""</span>
+<span class="sd">    Start a Grad Cafe pull in the background if one isn't already</span>
+<span class="sd">    running.</span>
+
+<span class="sd">    :returns: JSON ``{ok, status, message}``. ``ok``/``status`` are</span>
+<span class="sd">        ``True``/``"started"`` on success, or ``ok`` ``False`` with</span>
+<span class="sd">        status ``"error"`` if CHROME_BINARY or DATABASE_URL aren't set.</span>
+<span class="sd">        409 with ``ok`` ``False``, ``busy`` ``True``, and status</span>
+<span class="sd">        ``"already_running"`` if a pull is already in progress.</span>
+<span class="sd">    :rtype: flask.Response or tuple(flask.Response, int)</span>
+<span class="sd">    """</span>
+    <span class="n">chrome_binary</span> <span class="o">=</span> <span class="n">os</span><span class="o">.</span><span class="n">getenv</span><span class="p">(</span><span class="s2">"CHROME_BINARY"</span><span class="p">)</span>
+    <span class="k">if</span> <span class="ow">not</span> <span class="n">chrome_binary</span><span class="p">:</span>
+        <span class="k">return</span> <span class="n">jsonify</span><span class="p">(</span><span class="n">ok</span><span class="o">=</span><span class="kc">False</span><span class="p">,</span> <span class="n">status</span><span class="o">=</span><span class="s2">"error"</span><span class="p">,</span> <span class="n">message</span><span class="o">=</span><span class="p">(</span>
+            <span class="s2">"Set the CHROME_BINARY environment variable to your Chrome "</span>
+            <span class="s2">"binary's path before using Pull Data."</span>
+        <span class="p">))</span>
+
+    <span class="n">database_url</span> <span class="o">=</span> <span class="n">_database_url</span><span class="p">()</span>
+    <span class="k">if</span> <span class="n">database_url</span> <span class="ow">is</span> <span class="kc">None</span><span class="p">:</span>
+        <span class="k">return</span> <span class="n">jsonify</span><span class="p">(</span><span class="n">ok</span><span class="o">=</span><span class="kc">False</span><span class="p">,</span> <span class="n">status</span><span class="o">=</span><span class="s2">"error"</span><span class="p">,</span> <span class="n">message</span><span class="o">=</span><span class="p">(</span>
+            <span class="s2">"Set the DATABASE_URL environment variable before using Pull Data."</span>
+        <span class="p">))</span>
+
+    <span class="n">started</span> <span class="o">=</span> <span class="n">pull_control</span><span class="o">.</span><span class="n">start</span><span class="p">(</span><span class="n">chrome_binary</span><span class="p">,</span> <span class="n">database_url</span><span class="p">)</span>
+    <span class="k">if</span> <span class="ow">not</span> <span class="n">started</span><span class="p">:</span>
+        <span class="k">return</span> <span class="n">jsonify</span><span class="p">(</span>
+            <span class="n">ok</span><span class="o">=</span><span class="kc">False</span><span class="p">,</span> <span class="n">busy</span><span class="o">=</span><span class="kc">True</span><span class="p">,</span> <span class="n">status</span><span class="o">=</span><span class="s2">"already_running"</span><span class="p">,</span>
+            <span class="n">message</span><span class="o">=</span><span class="s2">"A pull is already in progress."</span><span class="p">,</span>
+        <span class="p">),</span> <span class="mi">409</span>
+    <span class="k">return</span> <span class="n">jsonify</span><span class="p">(</span><span class="n">ok</span><span class="o">=</span><span class="kc">True</span><span class="p">,</span> <span class="n">status</span><span class="o">=</span><span class="s2">"started"</span><span class="p">,</span> <span class="n">message</span><span class="o">=</span><span class="s2">"Pull started."</span><span class="p">)</span></div>
+
+
+
+<div class="viewcode-block" id="pull_cancel">
+<a class="viewcode-back" href="../../modules/app.routes.html#app.routes.pull_cancel">[docs]</a>
+<span class="nd">@bp</span><span class="o">.</span><span class="n">route</span><span class="p">(</span><span class="s2">"/pull/cancel"</span><span class="p">,</span> <span class="n">methods</span><span class="o">=</span><span class="p">[</span><span class="s2">"POST"</span><span class="p">])</span>
+<span class="k">def</span><span class="w"> </span><span class="nf">pull_cancel</span><span class="p">():</span>
+<span class="w">    </span><span class="sd">"""</span>
+<span class="sd">    Cancel the running pull, if the scrape itself is still going.</span>
+<span class="sd">    Whatever it already collected is still uploaded to PostgreSQL</span>
+<span class="sd">    afterward.</span>
+
+<span class="sd">    :returns: JSON ``{status, message}``, where ``status`` is</span>
+<span class="sd">        ``"cancelling"``, ``"finishing"``, or ``"not_running"``.</span>
+<span class="sd">    :rtype: flask.Response</span>
+<span class="sd">    """</span>
+    <span class="n">result</span> <span class="o">=</span> <span class="n">pull_control</span><span class="o">.</span><span class="n">cancel</span><span class="p">()</span>
+    <span class="n">messages</span> <span class="o">=</span> <span class="p">{</span>
+        <span class="s2">"cancelling"</span><span class="p">:</span> <span class="s2">"Cancelling: finishing the current page and uploading collected results."</span><span class="p">,</span>
+        <span class="s2">"finishing"</span><span class="p">:</span> <span class="s2">"The scrape has already finished; results are still being uploaded."</span><span class="p">,</span>
+        <span class="s2">"not_running"</span><span class="p">:</span> <span class="s2">"No pull is currently running."</span><span class="p">,</span>
+    <span class="p">}</span>
+    <span class="k">return</span> <span class="n">jsonify</span><span class="p">(</span><span class="n">status</span><span class="o">=</span><span class="n">result</span><span class="p">,</span> <span class="n">message</span><span class="o">=</span><span class="n">messages</span><span class="p">[</span><span class="n">result</span><span class="p">])</span></div>
+
+
+
+<div class="viewcode-block" id="pull_status">
+<a class="viewcode-back" href="../../modules/app.routes.html#app.routes.pull_status">[docs]</a>
+<span class="nd">@bp</span><span class="o">.</span><span class="n">route</span><span class="p">(</span><span class="s2">"/pull/status"</span><span class="p">)</span>
+<span class="k">def</span><span class="w"> </span><span class="nf">pull_status</span><span class="p">():</span>
+<span class="w">    </span><span class="sd">"""</span>
+<span class="sd">    Report whether a pull is currently running and its most recent</span>
+<span class="sd">    status lines, for the page to poll while a pull is active.</span>
+
+<span class="sd">    :returns: JSON ``{running, lines}``.</span>
+<span class="sd">    :rtype: flask.Response</span>
+<span class="sd">    """</span>
+    <span class="k">return</span> <span class="n">jsonify</span><span class="p">(</span><span class="n">running</span><span class="o">=</span><span class="n">pull_control</span><span class="o">.</span><span class="n">is_running</span><span class="p">(),</span> <span class="n">lines</span><span class="o">=</span><span class="n">pull_control</span><span class="o">.</span><span class="n">recent_lines</span><span class="p">())</span></div>
+
+
+
+<div class="viewcode-block" id="update_analysis">
+<a class="viewcode-back" href="../../modules/app.routes.html#app.routes.update_analysis">[docs]</a>
+<span class="nd">@bp</span><span class="o">.</span><span class="n">route</span><span class="p">(</span><span class="s2">"/update-analysis"</span><span class="p">,</span> <span class="n">methods</span><span class="o">=</span><span class="p">[</span><span class="s2">"POST"</span><span class="p">])</span>
+<span class="k">def</span><span class="w"> </span><span class="nf">update_analysis</span><span class="p">():</span>
+<span class="w">    </span><span class="sd">"""</span>
+<span class="sd">    Load whatever is currently in the results file into PostgreSQL (the</span>
+<span class="sd">    same upsert load_data() always does) so data added by hand, by the</span>
+<span class="sd">    LLM standardizer, or by a finished pull is reflected without</span>
+<span class="sd">    starting a new scrape. analysis() already runs fresh queries on</span>
+<span class="sd">    every GET /analysis, so the client reloads afterward to see the</span>
+<span class="sd">    results. Busy-gated like Pull Data since a running pull's own upload</span>
+<span class="sd">    step already owns the same table.</span>
+
+<span class="sd">    :returns: JSON ``{ok, status, message}``. 409 with ``ok`` ``False``,</span>
+<span class="sd">        ``busy`` ``True``, and status ``"busy"`` if a pull is running;</span>
+<span class="sd">        500 with ``ok`` ``False`` and status ``"error"`` if</span>
+<span class="sd">        DATABASE_URL isn't set; otherwise 200 with ``ok`` ``True``,</span>
+<span class="sd">        status ``"ok"``, and load_data()'s own summary as the message.</span>
+<span class="sd">    :rtype: flask.Response or tuple(flask.Response, int)</span>
+<span class="sd">    """</span>
+    <span class="k">if</span> <span class="n">pull_control</span><span class="o">.</span><span class="n">is_running</span><span class="p">():</span>
+        <span class="k">return</span> <span class="n">jsonify</span><span class="p">(</span><span class="n">ok</span><span class="o">=</span><span class="kc">False</span><span class="p">,</span> <span class="n">busy</span><span class="o">=</span><span class="kc">True</span><span class="p">,</span> <span class="n">status</span><span class="o">=</span><span class="s2">"busy"</span><span class="p">,</span> <span class="n">message</span><span class="o">=</span><span class="p">(</span>
+            <span class="s2">"New data is currently being retrieved. Please wait for the "</span>
+            <span class="s2">"pull to finish before updating."</span>
+        <span class="p">)),</span> <span class="mi">409</span>
+
+    <span class="n">database_url</span> <span class="o">=</span> <span class="n">_database_url</span><span class="p">()</span>
+    <span class="k">if</span> <span class="n">database_url</span> <span class="ow">is</span> <span class="kc">None</span><span class="p">:</span>
+        <span class="k">return</span> <span class="n">jsonify</span><span class="p">(</span><span class="n">ok</span><span class="o">=</span><span class="kc">False</span><span class="p">,</span> <span class="n">status</span><span class="o">=</span><span class="s2">"error"</span><span class="p">,</span> <span class="n">message</span><span class="o">=</span><span class="p">(</span>
+            <span class="s2">"Set the DATABASE_URL environment variable before using Update Analysis."</span>
+        <span class="p">)),</span> <span class="mi">500</span>
+
+    <span class="n">buffer</span> <span class="o">=</span> <span class="n">io</span><span class="o">.</span><span class="n">StringIO</span><span class="p">()</span>
+    <span class="k">with</span> <span class="n">contextlib</span><span class="o">.</span><span class="n">redirect_stdout</span><span class="p">(</span><span class="n">buffer</span><span class="p">):</span>
+        <span class="n">load_data</span><span class="p">(</span><span class="n">DEFAULT_DATA_FILE</span><span class="p">,</span> <span class="n">database_url</span><span class="p">)</span>
+
+    <span class="k">return</span> <span class="n">jsonify</span><span class="p">(</span><span class="n">ok</span><span class="o">=</span><span class="kc">True</span><span class="p">,</span> <span class="n">status</span><span class="o">=</span><span class="s2">"ok"</span><span class="p">,</span> <span class="n">message</span><span class="o">=</span><span class="n">buffer</span><span class="o">.</span><span class="n">getvalue</span><span class="p">()</span><span class="o">.</span><span class="n">strip</span><span class="p">()</span> <span class="ow">or</span> <span class="s2">"Analysis updated."</span><span class="p">)</span></div>
+
+</pre></div>
+
+           </div>
+          </div>
+          <footer>
+
+  <hr/>
+
+  <div role="contentinfo">
+    <p>&#169; Copyright 2026, Cameron Ela.</p>
+  </div>
+
+  Built with <a href="https://www.sphinx-doc.org/">Sphinx</a> using a
+    <a href="https://github.com/readthedocs/sphinx_rtd_theme">theme</a>
+    provided by <a href="https://readthedocs.org">Read the Docs</a>.
+   
+
+</footer>
+        </div>
+      </div>
+    </section>
+  </div>
+  <script>
+      jQuery(function () {
+          SphinxRtdTheme.Navigation.enable(true);
+      });
+  </script> 
+
+</body>
+</html>

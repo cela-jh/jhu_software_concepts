@@ -1,0 +1,195 @@
+
+
+<!DOCTYPE html>
+<html class="writer-html5" lang="en" data-content_root="../">
+<head>
+  <meta charset="utf-8" /><meta name="viewport" content="width=device-width, initial-scale=1" />
+
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>database.load_data module &mdash; GradCafe Analytics 1.0 documentation</title>
+      <link rel="stylesheet" type="text/css" href="../_static/pygments.css?v=b86133f3" />
+      <link rel="stylesheet" type="text/css" href="../_static/css/theme.css?v=9edc463e" />
+
+  
+      <script src="../_static/jquery.js?v=5d32c60e"></script>
+      <script src="../_static/_sphinx_javascript_frameworks_compat.js?v=2cd50e6c"></script>
+      <script src="../_static/documentation_options.js?v=f2a433a1"></script>
+      <script src="../_static/doctools.js?v=fd6eb6e6"></script>
+      <script src="../_static/sphinx_highlight.js?v=6ffebe34"></script>
+    <script src="../_static/js/theme.js"></script>
+    <link rel="index" title="Index" href="../genindex.html" />
+    <link rel="search" title="Search" href="../search.html" />
+    <link rel="next" title="database.models module" href="database.models.html" />
+    <link rel="prev" title="database.db_helpers module" href="database.db_helpers.html" /> 
+</head>
+
+<body class="wy-body-for-nav"> 
+  <div class="wy-grid-for-nav">
+    <nav data-toggle="wy-nav-shift" class="wy-nav-side">
+      <div class="wy-side-scroll">
+        <div class="wy-side-nav-search" >
+
+          
+          
+          <a href="../index.html" class="icon icon-home">
+            GradCafe Analytics
+          </a>
+<div role="search">
+  <form id="rtd-search-form" class="wy-form" action="../search.html" method="get">
+    <input type="text" name="q" placeholder="Search docs" aria-label="Search docs" />
+    <input type="hidden" name="check_keywords" value="yes" />
+    <input type="hidden" name="area" value="default" />
+  </form>
+</div>
+        </div><div class="wy-menu wy-menu-vertical" data-spy="affix" role="navigation" aria-label="Navigation menu">
+              <p class="caption" role="heading"><span class="caption-text">Contents:</span></p>
+<ul class="current">
+<li class="toctree-l1"><a class="reference internal" href="../overview_setup.html">Overview &amp; Setup</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../architecture.html">Architecture</a></li>
+<li class="toctree-l1 current"><a class="reference internal" href="modules.html">API Reference</a><ul class="current">
+<li class="toctree-l2"><a class="reference internal" href="app.html">app package</a></li>
+<li class="toctree-l2 current"><a class="reference internal" href="database.html">database package</a><ul class="current">
+<li class="toctree-l3 current"><a class="reference internal" href="database.html#submodules">Submodules</a><ul class="current">
+<li class="toctree-l4"><a class="reference internal" href="database.db_helpers.html">database.db_helpers module</a></li>
+<li class="toctree-l4 current"><a class="current reference internal" href="#">database.load_data module</a></li>
+<li class="toctree-l4"><a class="reference internal" href="database.models.html">database.models module</a></li>
+<li class="toctree-l4"><a class="reference internal" href="database.orm_queries.html">database.orm_queries module</a></li>
+<li class="toctree-l4"><a class="reference internal" href="database.query_data.html">database.query_data module</a></li>
+</ul>
+</li>
+<li class="toctree-l3"><a class="reference internal" href="database.html#module-database">Module contents</a></li>
+</ul>
+</li>
+<li class="toctree-l2"><a class="reference internal" href="llm_hosting.html">llm_hosting package</a></li>
+<li class="toctree-l2"><a class="reference internal" href="paths.html">paths module</a></li>
+<li class="toctree-l2"><a class="reference internal" href="run.html">run module</a></li>
+<li class="toctree-l2"><a class="reference internal" href="scraping.html">scraping package</a></li>
+</ul>
+</li>
+<li class="toctree-l1"><a class="reference internal" href="../testing_guide.html">Testing Guide</a></li>
+</ul>
+
+        </div>
+      </div>
+    </nav>
+
+    <section data-toggle="wy-nav-shift" class="wy-nav-content-wrap"><nav class="wy-nav-top" aria-label="Mobile navigation menu" >
+          <i data-toggle="wy-nav-top" class="fa fa-bars"></i>
+          <a href="../index.html">GradCafe Analytics</a>
+      </nav>
+
+      <div class="wy-nav-content">
+        <div class="rst-content">
+          <div role="navigation" aria-label="Page navigation">
+  <ul class="wy-breadcrumbs">
+      <li><a href="../index.html" class="icon icon-home" aria-label="Home"></a></li>
+          <li class="breadcrumb-item"><a href="modules.html">API Reference</a></li>
+          <li class="breadcrumb-item"><a href="database.html">database package</a></li>
+      <li class="breadcrumb-item active">database.load_data module</li>
+      <li class="wy-breadcrumbs-aside">
+            <a href="../_sources/modules/database.load_data.rst.txt" rel="nofollow"> View page source</a>
+      </li>
+  </ul>
+  <hr/>
+</div>
+          <div role="main" class="document" itemscope="itemscope" itemtype="http://schema.org/Article">
+           <div itemprop="articleBody">
+             
+  <section id="module-database.load_data">
+<span id="database-load-data-module"></span><h1>database.load_data module<a class="headerlink" href="#module-database.load_data" title="Link to this heading"></a></h1>
+<p><cite>load_data.py</cite>
+Takes cleaned applicant data and loads it into a PostgreSQL database. Run
+directly (<cite>python load_data.py [file.json]</cite>) to load a file; <cite>load_data</cite>
+can also be imported and called on its own.</p>
+<dl class="py exception">
+<dt class="sig sig-object py" id="database.load_data.InvalidResult">
+<span class="property"><span class="k"><span class="pre">exception</span></span><span class="w"> </span></span><span class="sig-prename descclassname"><span class="pre">database.load_data.</span></span><span class="sig-name descname"><span class="pre">InvalidResult</span></span><a class="reference internal" href="../_modules/database/load_data.html#InvalidResult"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#database.load_data.InvalidResult" title="Link to this definition"></a></dt>
+<dd><p>Bases: <code class="xref py py-class docutils literal notranslate"><span class="pre">Exception</span></code></p>
+<p>Raised when a result is missing required fields or has an invalid structure.</p>
+</dd></dl>
+
+<dl class="py function">
+<dt class="sig sig-object py" id="database.load_data.load_data">
+<span class="sig-prename descclassname"><span class="pre">database.load_data.</span></span><span class="sig-name descname"><span class="pre">load_data</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">filepath</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">database_url</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">str</span></span></em><span class="sig-paren">)</span><a class="reference internal" href="../_modules/database/load_data.html#load_data"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#database.load_data.load_data" title="Link to this definition"></a></dt>
+<dd><p>Load applicant results from a JSON file into the applicants table.
+Results missing required fields are skipped and reported. A result
+whose url already exists in the table is upserted rather than
+skipped, so a file that adds optional fields not present in an
+earlier load (such as the llm_generated fields) fills them in on the
+existing row instead of being ignored. Implausible gpa/gre/gre_v/
+gre_aw values, whether from this file or already in the table from an
+earlier load, are cleared to NULL rather than left to skew analysis,
+and any us_or_international value that isn’t ‘American’ or
+‘International’ is normalized to ‘Other’, in this file and in the
+table already.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Parameters<span class="colon">:</span></dt>
+<dd class="field-odd"><ul class="simple">
+<li><p><strong>filepath</strong> (<em>str</em><em> or </em><em>pathlib.Path</em>) – Path to the JSON results file to load.</p></li>
+<li><p><strong>database_url</strong> (<em>str</em>) – A “postgresql://user:password&#64;host:port/dbname”
+connection string.</p></li>
+</ul>
+</dd>
+<dt class="field-even">Returns<span class="colon">:</span></dt>
+<dd class="field-even"><p>True if the file was read and the database reached (even
+if some individual results were skipped as invalid), or False
+if the file couldn’t be read or the database couldn’t be
+reached at all - callers (the CLI entry point, the Pull Data
+upload step) use this to tell an unsuccessful load apart from a
+completed one.</p>
+</dd>
+<dt class="field-odd">Return type<span class="colon">:</span></dt>
+<dd class="field-odd"><p>bool</p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py function">
+<dt class="sig sig-object py" id="database.load_data.parse_args">
+<span class="sig-prename descclassname"><span class="pre">database.load_data.</span></span><span class="sig-name descname"><span class="pre">parse_args</span></span><span class="sig-paren">(</span><span class="sig-paren">)</span><a class="reference internal" href="../_modules/database/load_data.html#parse_args"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#database.load_data.parse_args" title="Link to this definition"></a></dt>
+<dd><p>Parse CLI arguments for loading a results file into PostgreSQL
+directly.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Returns<span class="colon">:</span></dt>
+<dd class="field-odd"><p>Parsed arguments with a <cite>relative_filepath</cite> attribute.</p>
+</dd>
+<dt class="field-even">Return type<span class="colon">:</span></dt>
+<dd class="field-even"><p>argparse.Namespace</p>
+</dd>
+</dl>
+</dd></dl>
+
+</section>
+
+
+           </div>
+          </div>
+          <footer><div class="rst-footer-buttons" role="navigation" aria-label="Footer">
+        <a href="database.db_helpers.html" class="btn btn-neutral float-left" title="database.db_helpers module" accesskey="p" rel="prev"><span class="fa fa-arrow-circle-left" aria-hidden="true"></span> Previous</a>
+        <a href="database.models.html" class="btn btn-neutral float-right" title="database.models module" accesskey="n" rel="next">Next <span class="fa fa-arrow-circle-right" aria-hidden="true"></span></a>
+    </div>
+
+  <hr/>
+
+  <div role="contentinfo">
+    <p>&#169; Copyright 2026, Cameron Ela.</p>
+  </div>
+
+  Built with <a href="https://www.sphinx-doc.org/">Sphinx</a> using a
+    <a href="https://github.com/readthedocs/sphinx_rtd_theme">theme</a>
+    provided by <a href="https://readthedocs.org">Read the Docs</a>.
+   
+
+</footer>
+        </div>
+      </div>
+    </section>
+  </div>
+  <script>
+      jQuery(function () {
+          SphinxRtdTheme.Navigation.enable(true);
+      });
+  </script> 
+
+</body>
+</html>

@@ -1,0 +1,562 @@
+
+
+<!DOCTYPE html>
+<html class="writer-html5" lang="en" data-content_root="../../">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>database.load_data &mdash; GradCafe Analytics 1.0 documentation</title>
+      <link rel="stylesheet" type="text/css" href="../../_static/pygments.css?v=b86133f3" />
+      <link rel="stylesheet" type="text/css" href="../../_static/css/theme.css?v=9edc463e" />
+
+  
+      <script src="../../_static/jquery.js?v=5d32c60e"></script>
+      <script src="../../_static/_sphinx_javascript_frameworks_compat.js?v=2cd50e6c"></script>
+      <script src="../../_static/documentation_options.js?v=f2a433a1"></script>
+      <script src="../../_static/doctools.js?v=fd6eb6e6"></script>
+      <script src="../../_static/sphinx_highlight.js?v=6ffebe34"></script>
+    <script src="../../_static/js/theme.js"></script>
+    <link rel="index" title="Index" href="../../genindex.html" />
+    <link rel="search" title="Search" href="../../search.html" /> 
+</head>
+
+<body class="wy-body-for-nav"> 
+  <div class="wy-grid-for-nav">
+    <nav data-toggle="wy-nav-shift" class="wy-nav-side">
+      <div class="wy-side-scroll">
+        <div class="wy-side-nav-search" >
+
+          
+          
+          <a href="../../index.html" class="icon icon-home">
+            GradCafe Analytics
+          </a>
+<div role="search">
+  <form id="rtd-search-form" class="wy-form" action="../../search.html" method="get">
+    <input type="text" name="q" placeholder="Search docs" aria-label="Search docs" />
+    <input type="hidden" name="check_keywords" value="yes" />
+    <input type="hidden" name="area" value="default" />
+  </form>
+</div>
+        </div><div class="wy-menu wy-menu-vertical" data-spy="affix" role="navigation" aria-label="Navigation menu">
+              <p class="caption" role="heading"><span class="caption-text">Contents:</span></p>
+<ul>
+<li class="toctree-l1"><a class="reference internal" href="../../overview_setup.html">Overview &amp; Setup</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../architecture.html">Architecture</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../modules/modules.html">API Reference</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../testing_guide.html">Testing Guide</a></li>
+</ul>
+
+        </div>
+      </div>
+    </nav>
+
+    <section data-toggle="wy-nav-shift" class="wy-nav-content-wrap"><nav class="wy-nav-top" aria-label="Mobile navigation menu" >
+          <i data-toggle="wy-nav-top" class="fa fa-bars"></i>
+          <a href="../../index.html">GradCafe Analytics</a>
+      </nav>
+
+      <div class="wy-nav-content">
+        <div class="rst-content">
+          <div role="navigation" aria-label="Page navigation">
+  <ul class="wy-breadcrumbs">
+      <li><a href="../../index.html" class="icon icon-home" aria-label="Home"></a></li>
+          <li class="breadcrumb-item"><a href="../index.html">Module code</a></li>
+      <li class="breadcrumb-item active">database.load_data</li>
+      <li class="wy-breadcrumbs-aside">
+      </li>
+  </ul>
+  <hr/>
+</div>
+          <div role="main" class="document" itemscope="itemscope" itemtype="http://schema.org/Article">
+           <div itemprop="articleBody">
+             
+  <h1>Source code for database.load_data</h1><div class="highlight"><pre>
+<span></span><span class="sd">"""</span>
+<span class="sd">`load_data.py`</span>
+<span class="sd">Takes cleaned applicant data and loads it into a PostgreSQL database. Run</span>
+<span class="sd">directly (`python load_data.py [file.json]`) to load a file; `load_data`</span>
+<span class="sd">can also be imported and called on its own.</span>
+<span class="sd">"""</span>
+<span class="kn">import</span><span class="w"> </span><span class="nn">argparse</span>
+<span class="kn">import</span><span class="w"> </span><span class="nn">json</span>
+<span class="kn">import</span><span class="w"> </span><span class="nn">os</span>
+<span class="kn">import</span><span class="w"> </span><span class="nn">re</span>
+<span class="kn">import</span><span class="w"> </span><span class="nn">sys</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">datetime</span><span class="w"> </span><span class="kn">import</span> <span class="n">datetime</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">pathlib</span><span class="w"> </span><span class="kn">import</span> <span class="n">Path</span>
+<span class="kn">import</span><span class="w"> </span><span class="nn">psycopg</span>
+
+<span class="c1"># Ensures db_helpers resolves whether load_data.py is run directly or</span>
+<span class="c1"># imported as database.load_data from elsewhere in the package.</span>
+<span class="n">sys</span><span class="o">.</span><span class="n">path</span><span class="o">.</span><span class="n">insert</span><span class="p">(</span><span class="mi">0</span><span class="p">,</span> <span class="nb">str</span><span class="p">(</span><span class="n">Path</span><span class="p">(</span><span class="vm">__file__</span><span class="p">)</span><span class="o">.</span><span class="n">resolve</span><span class="p">()</span><span class="o">.</span><span class="n">parent</span><span class="p">))</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">db_helpers</span><span class="w"> </span><span class="kn">import</span> <span class="n">connect_db</span><span class="p">,</span> <span class="n">disconnect_db</span>
+
+<span class="c1"># paths.py is a sibling of database/, directly under src/.</span>
+<span class="c1"># Imported unconditionally (not just under `if __name__`) since</span>
+<span class="c1"># parse_args() needs DEFAULT_DATA_FILE whether or not this module is</span>
+<span class="c1"># being run as a script.</span>
+<span class="n">sys</span><span class="o">.</span><span class="n">path</span><span class="o">.</span><span class="n">insert</span><span class="p">(</span><span class="mi">0</span><span class="p">,</span> <span class="nb">str</span><span class="p">(</span><span class="n">Path</span><span class="p">(</span><span class="vm">__file__</span><span class="p">)</span><span class="o">.</span><span class="n">resolve</span><span class="p">()</span><span class="o">.</span><span class="n">parent</span><span class="o">.</span><span class="n">parent</span><span class="p">))</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">paths</span><span class="w"> </span><span class="kn">import</span> <span class="n">DEFAULT_DATA_FILE</span>
+
+
+<span class="n">REQUIRED_FIELDS</span> <span class="o">=</span> <span class="p">{</span>
+    <span class="s2">"program"</span><span class="p">:</span> <span class="s2">"program"</span><span class="p">,</span>
+    <span class="s2">"date added"</span><span class="p">:</span> <span class="s2">"date_added"</span><span class="p">,</span>
+    <span class="s2">"url"</span><span class="p">:</span> <span class="s2">"url"</span><span class="p">,</span>
+    <span class="s2">"status"</span><span class="p">:</span> <span class="s2">"status"</span><span class="p">,</span>
+    <span class="s2">"term"</span><span class="p">:</span> <span class="s2">"term"</span><span class="p">,</span>
+    <span class="s2">"US/International"</span><span class="p">:</span> <span class="s2">"us_or_international"</span><span class="p">,</span>
+    <span class="s2">"degree"</span><span class="p">:</span> <span class="s2">"degree"</span><span class="p">,</span>
+<span class="p">}</span>
+
+<span class="n">COLUMNS</span> <span class="o">=</span> <span class="p">[</span>
+    <span class="s2">"p_id"</span><span class="p">,</span> <span class="s2">"program"</span><span class="p">,</span> <span class="s2">"comments"</span><span class="p">,</span> <span class="s2">"date_added"</span><span class="p">,</span> <span class="s2">"url"</span><span class="p">,</span> <span class="s2">"status"</span><span class="p">,</span> <span class="s2">"term"</span><span class="p">,</span>
+    <span class="s2">"us_or_international"</span><span class="p">,</span> <span class="s2">"gpa"</span><span class="p">,</span> <span class="s2">"gre"</span><span class="p">,</span> <span class="s2">"gre_v"</span><span class="p">,</span> <span class="s2">"gre_aw"</span><span class="p">,</span> <span class="s2">"degree"</span><span class="p">,</span>
+    <span class="s2">"llm_generated_program"</span><span class="p">,</span> <span class="s2">"llm_generated_university"</span><span class="p">,</span>
+<span class="p">]</span>
+
+<span class="n">BATCH_SIZE</span> <span class="o">=</span> <span class="mi">1000</span>
+<span class="n">SMALL_BATCH_SIZE</span> <span class="o">=</span> <span class="mi">10</span>
+
+<span class="n">GPA_VALID_RANGE</span> <span class="o">=</span> <span class="p">(</span><span class="mi">0</span><span class="p">,</span> <span class="mf">4.0</span><span class="p">)</span>
+<span class="n">GRE_VALID_RANGES</span> <span class="o">=</span> <span class="p">[(</span><span class="mi">130</span><span class="p">,</span> <span class="mi">170</span><span class="p">)]</span>
+<span class="n">GRE_V_VALID_RANGE</span> <span class="o">=</span> <span class="p">(</span><span class="mi">130</span><span class="p">,</span> <span class="mi">170</span><span class="p">)</span>
+<span class="n">GRE_AW_VALID_RANGE</span> <span class="o">=</span> <span class="p">(</span><span class="mi">0</span><span class="p">,</span> <span class="mi">6</span><span class="p">)</span>
+
+<span class="n">NATIONALITY_VALUES</span> <span class="o">=</span> <span class="p">{</span><span class="s2">"american"</span><span class="p">:</span> <span class="s2">"American"</span><span class="p">,</span> <span class="s2">"international"</span><span class="p">:</span> <span class="s2">"International"</span><span class="p">}</span>
+
+
+<div class="viewcode-block" id="InvalidResult">
+<a class="viewcode-back" href="../../modules/database.load_data.html#database.load_data.InvalidResult">[docs]</a>
+<span class="k">class</span><span class="w"> </span><span class="nc">InvalidResult</span><span class="p">(</span><span class="ne">Exception</span><span class="p">):</span>
+<span class="w">    </span><span class="sd">"""Raised when a result is missing required fields or has an invalid structure."""</span></div>
+
+
+
+<span class="k">def</span><span class="w"> </span><span class="nf">_extract_number</span><span class="p">(</span><span class="n">text</span><span class="p">,</span> <span class="n">valid_ranges</span><span class="o">=</span><span class="kc">None</span><span class="p">):</span>
+<span class="w">    </span><span class="sd">"""</span>
+<span class="sd">    Pull the first number out of a badge string such as "GPA 3.40".</span>
+
+<span class="sd">    :param text: The badge string to extract a number from.</span>
+<span class="sd">    :type text: str or None</span>
+<span class="sd">    :param valid_ranges: A list of (low, high) inclusive bounds; a number</span>
+<span class="sd">        outside every range is discarded as an implausible or</span>
+<span class="sd">        mis-scaled value rather than being stored as-is.</span>
+<span class="sd">    :type valid_ranges: list[tuple(float, float)] or None</span>
+<span class="sd">    :returns: The extracted number, or None if text is missing, has no</span>
+<span class="sd">        number, or the number falls outside every given valid range.</span>
+<span class="sd">    :rtype: float or None</span>
+<span class="sd">    """</span>
+    <span class="k">if</span> <span class="ow">not</span> <span class="n">text</span><span class="p">:</span>
+        <span class="k">return</span> <span class="kc">None</span>
+    <span class="n">match</span> <span class="o">=</span> <span class="n">re</span><span class="o">.</span><span class="n">search</span><span class="p">(</span><span class="sa">r</span><span class="s2">"[\d.]+"</span><span class="p">,</span> <span class="n">text</span><span class="p">)</span>
+    <span class="k">if</span> <span class="ow">not</span> <span class="n">match</span><span class="p">:</span>
+        <span class="k">return</span> <span class="kc">None</span>
+    <span class="n">value</span> <span class="o">=</span> <span class="nb">float</span><span class="p">(</span><span class="n">match</span><span class="o">.</span><span class="n">group</span><span class="p">())</span>
+    <span class="k">if</span> <span class="n">valid_ranges</span> <span class="ow">is</span> <span class="ow">not</span> <span class="kc">None</span> <span class="ow">and</span> <span class="ow">not</span> <span class="nb">any</span><span class="p">(</span><span class="n">low</span> <span class="o">&lt;=</span> <span class="n">value</span> <span class="o">&lt;=</span> <span class="n">high</span> <span class="k">for</span> <span class="n">low</span><span class="p">,</span> <span class="n">high</span> <span class="ow">in</span> <span class="n">valid_ranges</span><span class="p">):</span>
+        <span class="k">return</span> <span class="kc">None</span>
+    <span class="k">return</span> <span class="n">value</span>
+
+
+<span class="k">def</span><span class="w"> </span><span class="nf">_normalize_nationality</span><span class="p">(</span><span class="n">value</span><span class="p">):</span>
+<span class="w">    </span><span class="sd">"""</span>
+<span class="sd">    Map a scraped US/International value to 'American' or</span>
+<span class="sd">    'International' case-insensitively, or 'Other' for anything else</span>
+<span class="sd">    (including values that were scraped from the wrong tag and aren't a</span>
+<span class="sd">    nationality at all).</span>
+
+<span class="sd">    :param value: The scraped US/International value.</span>
+<span class="sd">    :type value: str</span>
+<span class="sd">    :returns: 'American', 'International', or 'Other'.</span>
+<span class="sd">    :rtype: str</span>
+<span class="sd">    """</span>
+    <span class="k">return</span> <span class="n">NATIONALITY_VALUES</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="n">value</span><span class="o">.</span><span class="n">strip</span><span class="p">()</span><span class="o">.</span><span class="n">lower</span><span class="p">(),</span> <span class="s2">"Other"</span><span class="p">)</span>
+
+
+<span class="k">def</span><span class="w"> </span><span class="nf">_parse_date_added</span><span class="p">(</span><span class="n">text</span><span class="p">):</span>
+<span class="w">    </span><span class="sd">"""</span>
+<span class="sd">    Parse a "date added" string such as "Added on Sep 12, 2026" into a date.</span>
+
+<span class="sd">    :param text: The "date added" string to parse.</span>
+<span class="sd">    :type text: str</span>
+<span class="sd">    :raises ValueError: If text doesn't match the expected format.</span>
+<span class="sd">    :returns: The parsed date.</span>
+<span class="sd">    :rtype: datetime.date</span>
+<span class="sd">    """</span>
+    <span class="n">cleaned</span> <span class="o">=</span> <span class="n">text</span><span class="o">.</span><span class="n">removeprefix</span><span class="p">(</span><span class="s2">"Added on "</span><span class="p">)</span><span class="o">.</span><span class="n">strip</span><span class="p">()</span>
+    <span class="k">return</span> <span class="n">datetime</span><span class="o">.</span><span class="n">strptime</span><span class="p">(</span><span class="n">cleaned</span><span class="p">,</span> <span class="s2">"%b </span><span class="si">%d</span><span class="s2">, %Y"</span><span class="p">)</span><span class="o">.</span><span class="n">date</span><span class="p">()</span>
+
+
+<span class="k">def</span><span class="w"> </span><span class="nf">_extract_result_id</span><span class="p">(</span><span class="n">url</span><span class="p">):</span>
+<span class="w">    </span><span class="sd">"""</span>
+<span class="sd">    Pull the numeric Grad Cafe result ID out of a result URL, for use as</span>
+<span class="sd">    the table's p_id.</span>
+
+<span class="sd">    :param url: The result URL to extract an ID from.</span>
+<span class="sd">    :type url: str or None</span>
+<span class="sd">    :returns: The extracted ID, or None if none could be found in the URL.</span>
+<span class="sd">    :rtype: int or None</span>
+<span class="sd">    """</span>
+    <span class="n">match</span> <span class="o">=</span> <span class="n">re</span><span class="o">.</span><span class="n">search</span><span class="p">(</span><span class="sa">r</span><span class="s2">"/result/(\d+)"</span><span class="p">,</span> <span class="n">url</span> <span class="ow">or</span> <span class="s2">""</span><span class="p">)</span>
+    <span class="k">return</span> <span class="nb">int</span><span class="p">(</span><span class="n">match</span><span class="o">.</span><span class="n">group</span><span class="p">(</span><span class="mi">1</span><span class="p">))</span> <span class="k">if</span> <span class="n">match</span> <span class="k">else</span> <span class="kc">None</span>
+
+
+<span class="k">def</span><span class="w"> </span><span class="nf">_build_row</span><span class="p">(</span><span class="n">result</span><span class="p">):</span>
+<span class="w">    </span><span class="sd">"""</span>
+<span class="sd">    Validate and transform a single scraped result into a row ready for</span>
+<span class="sd">    insertion into the applicants table.</span>
+
+<span class="sd">    :param result: The raw scraped result.</span>
+<span class="sd">    :type result: dict</span>
+<span class="sd">    :raises InvalidResult: If any required field is missing or invalid.</span>
+<span class="sd">    :returns: A dictionary of column values.</span>
+<span class="sd">    :rtype: dict</span>
+<span class="sd">    """</span>
+    <span class="n">missing</span> <span class="o">=</span> <span class="p">[</span><span class="n">column</span> <span class="k">for</span> <span class="n">key</span><span class="p">,</span> <span class="n">column</span> <span class="ow">in</span> <span class="n">REQUIRED_FIELDS</span><span class="o">.</span><span class="n">items</span><span class="p">()</span> <span class="k">if</span> <span class="ow">not</span> <span class="n">result</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="n">key</span><span class="p">)]</span>
+
+    <span class="n">date_added</span> <span class="o">=</span> <span class="kc">None</span>
+    <span class="k">if</span> <span class="n">result</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s2">"date added"</span><span class="p">):</span>
+        <span class="k">try</span><span class="p">:</span>
+            <span class="n">date_added</span> <span class="o">=</span> <span class="n">_parse_date_added</span><span class="p">(</span><span class="n">result</span><span class="p">[</span><span class="s2">"date added"</span><span class="p">])</span>
+        <span class="k">except</span> <span class="ne">ValueError</span><span class="p">:</span>
+            <span class="n">missing</span><span class="o">.</span><span class="n">append</span><span class="p">(</span><span class="s2">"date_added"</span><span class="p">)</span>
+
+    <span class="n">p_id</span> <span class="o">=</span> <span class="n">_extract_result_id</span><span class="p">(</span><span class="n">result</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s2">"url"</span><span class="p">))</span>
+    <span class="k">if</span> <span class="n">result</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s2">"url"</span><span class="p">)</span> <span class="ow">and</span> <span class="n">p_id</span> <span class="ow">is</span> <span class="kc">None</span><span class="p">:</span>
+        <span class="n">missing</span><span class="o">.</span><span class="n">append</span><span class="p">(</span><span class="s2">"p_id"</span><span class="p">)</span>
+
+    <span class="k">if</span> <span class="n">missing</span><span class="p">:</span>
+        <span class="k">raise</span> <span class="n">InvalidResult</span><span class="p">(</span><span class="sa">f</span><span class="s2">"missing or invalid fields: </span><span class="si">{</span><span class="s1">', '</span><span class="o">.</span><span class="n">join</span><span class="p">(</span><span class="n">missing</span><span class="p">)</span><span class="si">}</span><span class="s2">"</span><span class="p">)</span>
+
+    <span class="k">return</span> <span class="p">{</span>
+        <span class="s2">"p_id"</span><span class="p">:</span> <span class="n">p_id</span><span class="p">,</span>
+        <span class="s2">"program"</span><span class="p">:</span> <span class="n">result</span><span class="p">[</span><span class="s2">"program"</span><span class="p">],</span>
+        <span class="s2">"comments"</span><span class="p">:</span> <span class="n">result</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s2">"comments"</span><span class="p">),</span>
+        <span class="s2">"date_added"</span><span class="p">:</span> <span class="n">date_added</span><span class="p">,</span>
+        <span class="s2">"url"</span><span class="p">:</span> <span class="n">result</span><span class="p">[</span><span class="s2">"url"</span><span class="p">],</span>
+        <span class="s2">"status"</span><span class="p">:</span> <span class="n">result</span><span class="p">[</span><span class="s2">"status"</span><span class="p">],</span>
+        <span class="s2">"term"</span><span class="p">:</span> <span class="n">result</span><span class="p">[</span><span class="s2">"term"</span><span class="p">],</span>
+        <span class="s2">"us_or_international"</span><span class="p">:</span> <span class="n">_normalize_nationality</span><span class="p">(</span><span class="n">result</span><span class="p">[</span><span class="s2">"US/International"</span><span class="p">]),</span>
+        <span class="s2">"gpa"</span><span class="p">:</span> <span class="n">_extract_number</span><span class="p">(</span><span class="n">result</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s2">"GPA"</span><span class="p">),</span> <span class="p">[</span><span class="n">GPA_VALID_RANGE</span><span class="p">]),</span>
+        <span class="s2">"gre"</span><span class="p">:</span> <span class="n">_extract_number</span><span class="p">(</span><span class="n">result</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s2">"GRE score"</span><span class="p">),</span> <span class="n">GRE_VALID_RANGES</span><span class="p">),</span>
+        <span class="s2">"gre_v"</span><span class="p">:</span> <span class="n">_extract_number</span><span class="p">(</span><span class="n">result</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s2">"GRE V score"</span><span class="p">),</span> <span class="p">[</span><span class="n">GRE_V_VALID_RANGE</span><span class="p">]),</span>
+        <span class="s2">"gre_aw"</span><span class="p">:</span> <span class="n">_extract_number</span><span class="p">(</span><span class="n">result</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s2">"GRE AW"</span><span class="p">),</span> <span class="p">[</span><span class="n">GRE_AW_VALID_RANGE</span><span class="p">]),</span>
+        <span class="s2">"degree"</span><span class="p">:</span> <span class="n">result</span><span class="p">[</span><span class="s2">"degree"</span><span class="p">],</span>
+        <span class="s2">"llm_generated_program"</span><span class="p">:</span> <span class="n">result</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s2">"llm-generated-program"</span><span class="p">),</span>
+        <span class="s2">"llm_generated_university"</span><span class="p">:</span> <span class="n">result</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s2">"llm-generated-university"</span><span class="p">),</span>
+    <span class="p">}</span>
+
+
+<span class="k">def</span><span class="w"> </span><span class="nf">_chunked</span><span class="p">(</span><span class="n">items</span><span class="p">,</span> <span class="n">size</span><span class="p">):</span>
+<span class="w">    </span><span class="sd">"""</span>
+<span class="sd">    Split items into consecutive lists of at most size items each.</span>
+
+<span class="sd">    :param items: The items to split.</span>
+<span class="sd">    :type items: list</span>
+<span class="sd">    :param size: The maximum size of each chunk.</span>
+<span class="sd">    :type size: int</span>
+<span class="sd">    :returns: A generator of lists.</span>
+<span class="sd">    :rtype: Iterator[list]</span>
+<span class="sd">    """</span>
+    <span class="k">for</span> <span class="n">i</span> <span class="ow">in</span> <span class="nb">range</span><span class="p">(</span><span class="mi">0</span><span class="p">,</span> <span class="nb">len</span><span class="p">(</span><span class="n">items</span><span class="p">),</span> <span class="n">size</span><span class="p">):</span>
+        <span class="k">yield</span> <span class="n">items</span><span class="p">[</span><span class="n">i</span><span class="p">:</span><span class="n">i</span> <span class="o">+</span> <span class="n">size</span><span class="p">]</span>
+
+
+<span class="n">UPDATE_COLUMNS</span> <span class="o">=</span> <span class="p">[</span><span class="n">column</span> <span class="k">for</span> <span class="n">column</span> <span class="ow">in</span> <span class="n">COLUMNS</span> <span class="k">if</span> <span class="n">column</span> <span class="ow">not</span> <span class="ow">in</span> <span class="p">(</span><span class="s2">"p_id"</span><span class="p">,</span> <span class="s2">"url"</span><span class="p">)]</span>
+
+
+<span class="k">def</span><span class="w"> </span><span class="nf">_insert_batch</span><span class="p">(</span><span class="n">cursor</span><span class="p">,</span> <span class="n">batch</span><span class="p">):</span>
+<span class="w">    </span><span class="sd">"""</span>
+<span class="sd">    Insert or upsert a batch of rows into the applicants table in a</span>
+<span class="sd">    single statement. When a row's url already exists, its columns are</span>
+<span class="sd">    updated with the new values, keeping the existing value for any</span>
+<span class="sd">    column the new data doesn't provide (COALESCE), so loading a file</span>
+<span class="sd">    that adds optional fields (such as llm_generated_program) fills them</span>
+<span class="sd">    in on already-loaded results instead of being skipped.</span>
+
+<span class="sd">    :param cursor: An open database cursor.</span>
+<span class="sd">    :type cursor: psycopg.Cursor</span>
+<span class="sd">    :param batch: The rows to insert or upsert.</span>
+<span class="sd">    :type batch: list[dict]</span>
+<span class="sd">    :returns: A tuple of (set of newly inserted urls, set of updated urls).</span>
+<span class="sd">    :rtype: tuple(set, set)</span>
+<span class="sd">    """</span>
+    <span class="n">placeholder_group</span> <span class="o">=</span> <span class="s2">"("</span> <span class="o">+</span> <span class="s2">", "</span><span class="o">.</span><span class="n">join</span><span class="p">([</span><span class="s2">"</span><span class="si">%s</span><span class="s2">"</span><span class="p">]</span> <span class="o">*</span> <span class="nb">len</span><span class="p">(</span><span class="n">COLUMNS</span><span class="p">))</span> <span class="o">+</span> <span class="s2">")"</span>
+    <span class="n">values_clause</span> <span class="o">=</span> <span class="s2">", "</span><span class="o">.</span><span class="n">join</span><span class="p">([</span><span class="n">placeholder_group</span><span class="p">]</span> <span class="o">*</span> <span class="nb">len</span><span class="p">(</span><span class="n">batch</span><span class="p">))</span>
+    <span class="n">set_clause</span> <span class="o">=</span> <span class="s2">", "</span><span class="o">.</span><span class="n">join</span><span class="p">(</span>
+        <span class="sa">f</span><span class="s2">"</span><span class="si">{</span><span class="n">column</span><span class="si">}</span><span class="s2"> = COALESCE(EXCLUDED.</span><span class="si">{</span><span class="n">column</span><span class="si">}</span><span class="s2">, applicants.</span><span class="si">{</span><span class="n">column</span><span class="si">}</span><span class="s2">)"</span>
+        <span class="k">for</span> <span class="n">column</span> <span class="ow">in</span> <span class="n">UPDATE_COLUMNS</span>
+    <span class="p">)</span>
+    <span class="n">sql</span> <span class="o">=</span> <span class="p">(</span>
+        <span class="sa">f</span><span class="s2">"INSERT INTO applicants (</span><span class="si">{</span><span class="s1">', '</span><span class="o">.</span><span class="n">join</span><span class="p">(</span><span class="n">COLUMNS</span><span class="p">)</span><span class="si">}</span><span class="s2">) "</span>
+        <span class="sa">f</span><span class="s2">"VALUES </span><span class="si">{</span><span class="n">values_clause</span><span class="si">}</span><span class="s2"> "</span>
+        <span class="sa">f</span><span class="s2">"ON CONFLICT (url) DO UPDATE SET </span><span class="si">{</span><span class="n">set_clause</span><span class="si">}</span><span class="s2"> "</span>
+        <span class="sa">f</span><span class="s2">"RETURNING url, (xmax = 0) AS inserted;"</span>
+    <span class="p">)</span>
+    <span class="n">params</span> <span class="o">=</span> <span class="p">[</span><span class="n">row</span><span class="p">[</span><span class="n">column</span><span class="p">]</span> <span class="k">for</span> <span class="n">row</span> <span class="ow">in</span> <span class="n">batch</span> <span class="k">for</span> <span class="n">column</span> <span class="ow">in</span> <span class="n">COLUMNS</span><span class="p">]</span>
+
+    <span class="n">cursor</span><span class="o">.</span><span class="n">execute</span><span class="p">(</span><span class="n">sql</span><span class="p">,</span> <span class="n">params</span><span class="p">)</span>
+    <span class="n">inserted_urls</span> <span class="o">=</span> <span class="nb">set</span><span class="p">()</span>
+    <span class="n">updated_urls</span> <span class="o">=</span> <span class="nb">set</span><span class="p">()</span>
+    <span class="k">for</span> <span class="n">url</span><span class="p">,</span> <span class="n">was_inserted</span> <span class="ow">in</span> <span class="n">cursor</span><span class="o">.</span><span class="n">fetchall</span><span class="p">():</span>
+        <span class="k">if</span> <span class="n">was_inserted</span><span class="p">:</span>
+            <span class="n">inserted_urls</span><span class="o">.</span><span class="n">add</span><span class="p">(</span><span class="n">url</span><span class="p">)</span>
+        <span class="k">else</span><span class="p">:</span>
+            <span class="n">updated_urls</span><span class="o">.</span><span class="n">add</span><span class="p">(</span><span class="n">url</span><span class="p">)</span>
+    <span class="k">return</span> <span class="n">inserted_urls</span><span class="p">,</span> <span class="n">updated_urls</span>
+
+
+<span class="k">def</span><span class="w"> </span><span class="nf">_insert_with_fallback</span><span class="p">(</span><span class="n">conn</span><span class="p">,</span> <span class="n">cursor</span><span class="p">,</span> <span class="n">batch</span><span class="p">):</span>
+<span class="w">    </span><span class="sd">"""</span>
+<span class="sd">    Upsert a batch of rows, using a savepoint so a failure only rolls</span>
+<span class="sd">    back this attempt rather than the whole load. If the batch fails, it</span>
+<span class="sd">    is split in half and each half is retried the same way, continuing</span>
+<span class="sd">    until batches are at most SMALL_BATCH_SIZE rows, at which point rows</span>
+<span class="sd">    are upserted one at a time so a bad row can be reported individually</span>
+<span class="sd">    instead of losing every row around it.</span>
+
+<span class="sd">    :param conn: An open database connection.</span>
+<span class="sd">    :type conn: psycopg.Connection</span>
+<span class="sd">    :param cursor: An open database cursor on conn.</span>
+<span class="sd">    :type cursor: psycopg.Cursor</span>
+<span class="sd">    :param batch: The rows to insert or upsert.</span>
+<span class="sd">    :type batch: list[dict]</span>
+<span class="sd">    :returns: A tuple of (set of newly inserted urls, set of updated urls).</span>
+<span class="sd">    :rtype: tuple(set, set)</span>
+<span class="sd">    """</span>
+    <span class="k">if</span> <span class="nb">len</span><span class="p">(</span><span class="n">batch</span><span class="p">)</span> <span class="o">&lt;=</span> <span class="n">SMALL_BATCH_SIZE</span><span class="p">:</span>
+        <span class="n">inserted</span> <span class="o">=</span> <span class="nb">set</span><span class="p">()</span>
+        <span class="n">updated</span> <span class="o">=</span> <span class="nb">set</span><span class="p">()</span>
+        <span class="k">for</span> <span class="n">row</span> <span class="ow">in</span> <span class="n">batch</span><span class="p">:</span>
+            <span class="k">try</span><span class="p">:</span>
+                <span class="k">with</span> <span class="n">conn</span><span class="o">.</span><span class="n">transaction</span><span class="p">():</span>
+                    <span class="n">row_inserted</span><span class="p">,</span> <span class="n">row_updated</span> <span class="o">=</span> <span class="n">_insert_batch</span><span class="p">(</span><span class="n">cursor</span><span class="p">,</span> <span class="p">[</span><span class="n">row</span><span class="p">])</span>
+                    <span class="n">inserted</span> <span class="o">|=</span> <span class="n">row_inserted</span>
+                    <span class="n">updated</span> <span class="o">|=</span> <span class="n">row_updated</span>
+            <span class="k">except</span> <span class="n">psycopg</span><span class="o">.</span><span class="n">DatabaseError</span> <span class="k">as</span> <span class="n">error</span><span class="p">:</span>
+                <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">"Could not insert result with url '</span><span class="si">{</span><span class="n">row</span><span class="p">[</span><span class="s1">'url'</span><span class="p">]</span><span class="si">}</span><span class="s2">': </span><span class="si">{</span><span class="n">error</span><span class="si">}</span><span class="s2">"</span><span class="p">)</span>
+        <span class="k">return</span> <span class="n">inserted</span><span class="p">,</span> <span class="n">updated</span>
+
+    <span class="k">try</span><span class="p">:</span>
+        <span class="k">with</span> <span class="n">conn</span><span class="o">.</span><span class="n">transaction</span><span class="p">():</span>
+            <span class="k">return</span> <span class="n">_insert_batch</span><span class="p">(</span><span class="n">cursor</span><span class="p">,</span> <span class="n">batch</span><span class="p">)</span>
+    <span class="k">except</span> <span class="n">psycopg</span><span class="o">.</span><span class="n">DatabaseError</span><span class="p">:</span>
+        <span class="n">mid</span> <span class="o">=</span> <span class="nb">len</span><span class="p">(</span><span class="n">batch</span><span class="p">)</span> <span class="o">//</span> <span class="mi">2</span>
+        <span class="n">first_inserted</span><span class="p">,</span> <span class="n">first_updated</span> <span class="o">=</span> <span class="n">_insert_with_fallback</span><span class="p">(</span><span class="n">conn</span><span class="p">,</span> <span class="n">cursor</span><span class="p">,</span> <span class="n">batch</span><span class="p">[:</span><span class="n">mid</span><span class="p">])</span>
+        <span class="n">second_inserted</span><span class="p">,</span> <span class="n">second_updated</span> <span class="o">=</span> <span class="n">_insert_with_fallback</span><span class="p">(</span><span class="n">conn</span><span class="p">,</span> <span class="n">cursor</span><span class="p">,</span> <span class="n">batch</span><span class="p">[</span><span class="n">mid</span><span class="p">:])</span>
+        <span class="k">return</span> <span class="n">first_inserted</span> <span class="o">|</span> <span class="n">second_inserted</span><span class="p">,</span> <span class="n">first_updated</span> <span class="o">|</span> <span class="n">second_updated</span>
+
+
+<span class="k">def</span><span class="w"> </span><span class="nf">_clear_invalid_scores</span><span class="p">(</span><span class="n">cursor</span><span class="p">):</span>
+<span class="w">    </span><span class="sd">"""</span>
+<span class="sd">    Null out gpa, gre, gre_v, and gre_aw values already in the table</span>
+<span class="sd">    that fall outside their valid score ranges, so implausible or</span>
+<span class="sd">    mis-scaled values loaded before this validation existed don't skew</span>
+<span class="sd">    analysis. Prints how many values were cleared for each column.</span>
+
+<span class="sd">    :param cursor: An open database cursor.</span>
+<span class="sd">    :type cursor: psycopg.Cursor</span>
+<span class="sd">    :returns: None.</span>
+<span class="sd">    :rtype: None</span>
+<span class="sd">    """</span>
+    <span class="n">cursor</span><span class="o">.</span><span class="n">execute</span><span class="p">(</span>
+        <span class="s2">"UPDATE applicants SET gpa = NULL "</span>
+        <span class="s2">"WHERE gpa IS NOT NULL AND NOT (gpa BETWEEN </span><span class="si">%s</span><span class="s2"> AND </span><span class="si">%s</span><span class="s2">);"</span><span class="p">,</span>
+        <span class="n">GPA_VALID_RANGE</span><span class="p">,</span>
+    <span class="p">)</span>
+    <span class="n">cleared_gpa</span> <span class="o">=</span> <span class="n">cursor</span><span class="o">.</span><span class="n">rowcount</span>
+    <span class="n">gre_range_clause</span> <span class="o">=</span> <span class="s2">" OR "</span><span class="o">.</span><span class="n">join</span><span class="p">([</span><span class="s2">"gre BETWEEN </span><span class="si">%s</span><span class="s2"> AND </span><span class="si">%s</span><span class="s2">"</span><span class="p">]</span> <span class="o">*</span> <span class="nb">len</span><span class="p">(</span><span class="n">GRE_VALID_RANGES</span><span class="p">))</span>
+    <span class="n">cursor</span><span class="o">.</span><span class="n">execute</span><span class="p">(</span>
+        <span class="sa">f</span><span class="s2">"UPDATE applicants SET gre = NULL "</span>
+        <span class="sa">f</span><span class="s2">"WHERE gre IS NOT NULL AND NOT (</span><span class="si">{</span><span class="n">gre_range_clause</span><span class="si">}</span><span class="s2">);"</span><span class="p">,</span>
+        <span class="p">[</span><span class="n">value</span> <span class="k">for</span> <span class="n">bounds</span> <span class="ow">in</span> <span class="n">GRE_VALID_RANGES</span> <span class="k">for</span> <span class="n">value</span> <span class="ow">in</span> <span class="n">bounds</span><span class="p">],</span>
+    <span class="p">)</span>
+    <span class="n">cleared_gre</span> <span class="o">=</span> <span class="n">cursor</span><span class="o">.</span><span class="n">rowcount</span>
+    <span class="n">cursor</span><span class="o">.</span><span class="n">execute</span><span class="p">(</span>
+        <span class="s2">"UPDATE applicants SET gre_v = NULL "</span>
+        <span class="s2">"WHERE gre_v IS NOT NULL AND NOT (gre_v BETWEEN </span><span class="si">%s</span><span class="s2"> AND </span><span class="si">%s</span><span class="s2">);"</span><span class="p">,</span>
+        <span class="n">GRE_V_VALID_RANGE</span><span class="p">,</span>
+    <span class="p">)</span>
+    <span class="n">cleared_gre_v</span> <span class="o">=</span> <span class="n">cursor</span><span class="o">.</span><span class="n">rowcount</span>
+    <span class="n">cursor</span><span class="o">.</span><span class="n">execute</span><span class="p">(</span>
+        <span class="s2">"UPDATE applicants SET gre_aw = NULL "</span>
+        <span class="s2">"WHERE gre_aw IS NOT NULL AND NOT (gre_aw BETWEEN </span><span class="si">%s</span><span class="s2"> AND </span><span class="si">%s</span><span class="s2">);"</span><span class="p">,</span>
+        <span class="n">GRE_AW_VALID_RANGE</span><span class="p">,</span>
+    <span class="p">)</span>
+    <span class="n">cleared_gre_aw</span> <span class="o">=</span> <span class="n">cursor</span><span class="o">.</span><span class="n">rowcount</span>
+
+    <span class="n">total</span> <span class="o">=</span> <span class="n">cleared_gpa</span> <span class="o">+</span> <span class="n">cleared_gre</span> <span class="o">+</span> <span class="n">cleared_gre_v</span> <span class="o">+</span> <span class="n">cleared_gre_aw</span>
+    <span class="k">if</span> <span class="n">total</span><span class="p">:</span>
+        <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">"Cleared </span><span class="si">{</span><span class="n">total</span><span class="si">}</span><span class="s2"> implausible score values already in the table "</span>
+              <span class="sa">f</span><span class="s2">"(gpa: </span><span class="si">{</span><span class="n">cleared_gpa</span><span class="si">}</span><span class="s2">, gre: </span><span class="si">{</span><span class="n">cleared_gre</span><span class="si">}</span><span class="s2">, gre_v: </span><span class="si">{</span><span class="n">cleared_gre_v</span><span class="si">}</span><span class="s2">, "</span>
+              <span class="sa">f</span><span class="s2">"gre_aw: </span><span class="si">{</span><span class="n">cleared_gre_aw</span><span class="si">}</span><span class="s2">)."</span><span class="p">)</span>
+
+
+<span class="k">def</span><span class="w"> </span><span class="nf">_normalize_existing_nationality</span><span class="p">(</span><span class="n">cursor</span><span class="p">):</span>
+<span class="w">    </span><span class="sd">"""</span>
+<span class="sd">    Set us_or_international to 'Other' for rows already in the table</span>
+<span class="sd">    whose value isn't 'American' or 'International', so a value scraped</span>
+<span class="sd">    from the wrong tag (such as a stray "0") doesn't get counted as a</span>
+<span class="sd">    usable nationality classification it isn't. Prints how many rows were</span>
+<span class="sd">    changed.</span>
+
+<span class="sd">    :param cursor: An open database cursor.</span>
+<span class="sd">    :type cursor: psycopg.Cursor</span>
+<span class="sd">    :returns: None.</span>
+<span class="sd">    :rtype: None</span>
+<span class="sd">    """</span>
+    <span class="n">cursor</span><span class="o">.</span><span class="n">execute</span><span class="p">(</span>
+        <span class="s2">"UPDATE applicants SET us_or_international = 'Other' "</span>
+        <span class="s2">"WHERE us_or_international NOT IN ('American', 'International');"</span>
+    <span class="p">)</span>
+    <span class="n">changed</span> <span class="o">=</span> <span class="n">cursor</span><span class="o">.</span><span class="n">rowcount</span>
+    <span class="k">if</span> <span class="n">changed</span><span class="p">:</span>
+        <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">"Set us_or_international to 'Other' for </span><span class="si">{</span><span class="n">changed</span><span class="si">}</span><span class="s2"> rows "</span>
+              <span class="sa">f</span><span class="s2">"that weren't 'American' or 'International'."</span><span class="p">)</span>
+
+
+<div class="viewcode-block" id="load_data">
+<a class="viewcode-back" href="../../modules/database.load_data.html#database.load_data.load_data">[docs]</a>
+<span class="k">def</span><span class="w"> </span><span class="nf">load_data</span><span class="p">(</span><span class="n">filepath</span><span class="p">,</span> <span class="n">database_url</span><span class="p">:</span> <span class="nb">str</span><span class="p">):</span>
+<span class="w">    </span><span class="sd">"""</span>
+<span class="sd">    Load applicant results from a JSON file into the applicants table.</span>
+<span class="sd">    Results missing required fields are skipped and reported. A result</span>
+<span class="sd">    whose url already exists in the table is upserted rather than</span>
+<span class="sd">    skipped, so a file that adds optional fields not present in an</span>
+<span class="sd">    earlier load (such as the llm_generated fields) fills them in on the</span>
+<span class="sd">    existing row instead of being ignored. Implausible gpa/gre/gre_v/</span>
+<span class="sd">    gre_aw values, whether from this file or already in the table from an</span>
+<span class="sd">    earlier load, are cleared to NULL rather than left to skew analysis,</span>
+<span class="sd">    and any us_or_international value that isn't 'American' or</span>
+<span class="sd">    'International' is normalized to 'Other', in this file and in the</span>
+<span class="sd">    table already.</span>
+
+<span class="sd">    :param filepath: Path to the JSON results file to load.</span>
+<span class="sd">    :type filepath: str or pathlib.Path</span>
+<span class="sd">    :param database_url: A "postgresql://user:password@host:port/dbname"</span>
+<span class="sd">        connection string.</span>
+<span class="sd">    :type database_url: str</span>
+<span class="sd">    :returns: True if the file was read and the database reached (even</span>
+<span class="sd">        if some individual results were skipped as invalid), or False</span>
+<span class="sd">        if the file couldn't be read or the database couldn't be</span>
+<span class="sd">        reached at all - callers (the CLI entry point, the Pull Data</span>
+<span class="sd">        upload step) use this to tell an unsuccessful load apart from a</span>
+<span class="sd">        completed one.</span>
+<span class="sd">    :rtype: bool</span>
+<span class="sd">    """</span>
+    <span class="k">try</span><span class="p">:</span>
+        <span class="k">with</span> <span class="nb">open</span><span class="p">(</span><span class="n">filepath</span><span class="p">,</span> <span class="s2">"r"</span><span class="p">)</span> <span class="k">as</span> <span class="n">f</span><span class="p">:</span>
+            <span class="n">results</span> <span class="o">=</span> <span class="n">json</span><span class="o">.</span><span class="n">load</span><span class="p">(</span><span class="n">f</span><span class="p">)</span>
+    <span class="k">except</span> <span class="ne">FileNotFoundError</span><span class="p">:</span>
+        <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">"Could not find the file '</span><span class="si">{</span><span class="n">filepath</span><span class="si">}</span><span class="s2">'. Check the path and try again."</span><span class="p">)</span>
+        <span class="k">return</span> <span class="kc">False</span>
+    <span class="k">except</span> <span class="n">json</span><span class="o">.</span><span class="n">JSONDecodeError</span> <span class="k">as</span> <span class="n">error</span><span class="p">:</span>
+        <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">"'</span><span class="si">{</span><span class="n">filepath</span><span class="si">}</span><span class="s2">' is not valid JSON: </span><span class="si">{</span><span class="n">error</span><span class="si">}</span><span class="s2">"</span><span class="p">)</span>
+        <span class="k">return</span> <span class="kc">False</span>
+    <span class="n">conn</span> <span class="o">=</span> <span class="n">connect_db</span><span class="p">(</span><span class="n">database_url</span><span class="p">)</span>
+    <span class="k">if</span> <span class="n">conn</span> <span class="ow">is</span> <span class="kc">None</span><span class="p">:</span>
+        <span class="k">return</span> <span class="kc">False</span>
+
+    <span class="n">valid_rows</span> <span class="o">=</span> <span class="p">[]</span>
+    <span class="n">failed_ids</span> <span class="o">=</span> <span class="p">[]</span>
+
+    <span class="k">for</span> <span class="n">result</span> <span class="ow">in</span> <span class="n">results</span><span class="p">:</span>
+        <span class="k">try</span><span class="p">:</span>
+            <span class="n">valid_rows</span><span class="o">.</span><span class="n">append</span><span class="p">(</span><span class="n">_build_row</span><span class="p">(</span><span class="n">result</span><span class="p">))</span>
+        <span class="k">except</span> <span class="n">InvalidResult</span><span class="p">:</span>
+            <span class="n">failed_ids</span><span class="o">.</span><span class="n">append</span><span class="p">(</span><span class="n">_extract_result_id</span><span class="p">(</span><span class="n">result</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s2">"url"</span><span class="p">))</span> <span class="ow">or</span> <span class="n">result</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s2">"url"</span><span class="p">,</span> <span class="s2">"unknown url"</span><span class="p">))</span>
+
+    <span class="n">inserted_urls</span> <span class="o">=</span> <span class="nb">set</span><span class="p">()</span>
+    <span class="n">updated_urls</span> <span class="o">=</span> <span class="nb">set</span><span class="p">()</span>
+    <span class="k">try</span><span class="p">:</span>
+        <span class="k">with</span> <span class="n">conn</span><span class="p">:</span>
+            <span class="k">with</span> <span class="n">conn</span><span class="o">.</span><span class="n">cursor</span><span class="p">()</span> <span class="k">as</span> <span class="n">cursor</span><span class="p">:</span>
+                <span class="k">for</span> <span class="n">batch</span> <span class="ow">in</span> <span class="n">_chunked</span><span class="p">(</span><span class="n">valid_rows</span><span class="p">,</span> <span class="n">BATCH_SIZE</span><span class="p">):</span>
+                    <span class="n">batch_inserted</span><span class="p">,</span> <span class="n">batch_updated</span> <span class="o">=</span> <span class="n">_insert_with_fallback</span><span class="p">(</span><span class="n">conn</span><span class="p">,</span> <span class="n">cursor</span><span class="p">,</span> <span class="n">batch</span><span class="p">)</span>
+                    <span class="n">inserted_urls</span> <span class="o">|=</span> <span class="n">batch_inserted</span>
+                    <span class="n">updated_urls</span> <span class="o">|=</span> <span class="n">batch_updated</span>
+                <span class="n">_clear_invalid_scores</span><span class="p">(</span><span class="n">cursor</span><span class="p">)</span>
+                <span class="n">_normalize_existing_nationality</span><span class="p">(</span><span class="n">cursor</span><span class="p">)</span>
+    <span class="k">finally</span><span class="p">:</span>
+        <span class="n">disconnect_db</span><span class="p">(</span><span class="n">conn</span><span class="p">)</span>
+
+    <span class="n">loaded</span> <span class="o">=</span> <span class="nb">len</span><span class="p">(</span><span class="n">inserted_urls</span><span class="p">)</span>
+    <span class="n">updated</span> <span class="o">=</span> <span class="nb">len</span><span class="p">(</span><span class="n">updated_urls</span><span class="p">)</span>
+    <span class="n">skipped_invalid</span> <span class="o">=</span> <span class="nb">len</span><span class="p">(</span><span class="n">failed_ids</span><span class="p">)</span>
+
+    <span class="k">if</span> <span class="n">failed_ids</span><span class="p">:</span>
+        <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">"Skipped </span><span class="si">{</span><span class="n">skipped_invalid</span><span class="si">}</span><span class="s2"> results with missing or invalid fields, ids: </span><span class="si">{</span><span class="n">failed_ids</span><span class="si">}</span><span class="s2">"</span><span class="p">)</span>
+
+    <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">"Loaded </span><span class="si">{</span><span class="n">loaded</span><span class="si">}</span><span class="s2"> new results. Updated </span><span class="si">{</span><span class="n">updated</span><span class="si">}</span><span class="s2"> existing results with "</span>
+          <span class="sa">f</span><span class="s2">"new field values. Skipped </span><span class="si">{</span><span class="n">skipped_invalid</span><span class="si">}</span><span class="s2"> with missing or invalid fields."</span><span class="p">)</span>
+
+    <span class="k">return</span> <span class="kc">True</span></div>
+
+
+
+<div class="viewcode-block" id="parse_args">
+<a class="viewcode-back" href="../../modules/database.load_data.html#database.load_data.parse_args">[docs]</a>
+<span class="k">def</span><span class="w"> </span><span class="nf">parse_args</span><span class="p">():</span>
+<span class="w">    </span><span class="sd">"""</span>
+<span class="sd">    Parse CLI arguments for loading a results file into PostgreSQL</span>
+<span class="sd">    directly.</span>
+
+<span class="sd">    :returns: Parsed arguments with a `relative_filepath` attribute.</span>
+<span class="sd">    :rtype: argparse.Namespace</span>
+<span class="sd">    """</span>
+    <span class="n">parser</span> <span class="o">=</span> <span class="n">argparse</span><span class="o">.</span><span class="n">ArgumentParser</span><span class="p">(</span>
+        <span class="n">description</span><span class="o">=</span><span class="s2">"Load a results file into the PostgreSQL applicants table."</span>
+    <span class="p">)</span>
+    <span class="n">parser</span><span class="o">.</span><span class="n">add_argument</span><span class="p">(</span>
+        <span class="s2">"relative_filepath"</span><span class="p">,</span> <span class="nb">type</span><span class="o">=</span><span class="n">Path</span><span class="p">,</span> <span class="n">nargs</span><span class="o">=</span><span class="s2">"?"</span><span class="p">,</span> <span class="n">default</span><span class="o">=</span><span class="n">DEFAULT_DATA_FILE</span><span class="p">,</span>
+        <span class="n">help</span><span class="o">=</span><span class="sa">f</span><span class="s2">"File to load into PostgreSQL (default: `</span><span class="si">{</span><span class="n">DEFAULT_DATA_FILE</span><span class="si">}</span><span class="s2">`)"</span>
+    <span class="p">)</span>
+    <span class="k">return</span> <span class="n">parser</span><span class="o">.</span><span class="n">parse_args</span><span class="p">()</span></div>
+
+
+
+<span class="k">if</span> <span class="vm">__name__</span> <span class="o">==</span> <span class="s2">"__main__"</span><span class="p">:</span>
+    <span class="c1"># scraping/ is a sibling of database/, directly under src/.</span>
+    <span class="kn">from</span><span class="w"> </span><span class="nn">scraping.storage</span><span class="w"> </span><span class="kn">import</span> <span class="n">validate_filepath</span>
+
+    <span class="n">cli_args</span> <span class="o">=</span> <span class="n">parse_args</span><span class="p">()</span>
+    <span class="n">validate_filepath</span><span class="p">(</span><span class="n">cli_args</span><span class="o">.</span><span class="n">relative_filepath</span><span class="p">,</span> <span class="n">must_exist</span><span class="o">=</span><span class="kc">True</span><span class="p">)</span>
+
+    <span class="n">database_url</span> <span class="o">=</span> <span class="n">os</span><span class="o">.</span><span class="n">getenv</span><span class="p">(</span><span class="s2">"DATABASE_URL"</span><span class="p">)</span>
+    <span class="k">if</span> <span class="ow">not</span> <span class="n">database_url</span><span class="p">:</span>
+        <span class="nb">print</span><span class="p">(</span><span class="s2">"Set the DATABASE_URL environment variable before running load_data.py."</span><span class="p">)</span>
+        <span class="n">sys</span><span class="o">.</span><span class="n">exit</span><span class="p">(</span><span class="mi">1</span><span class="p">)</span>
+
+    <span class="k">if</span> <span class="ow">not</span> <span class="n">load_data</span><span class="p">(</span><span class="n">cli_args</span><span class="o">.</span><span class="n">relative_filepath</span><span class="p">,</span> <span class="n">database_url</span><span class="p">):</span>
+        <span class="n">sys</span><span class="o">.</span><span class="n">exit</span><span class="p">(</span><span class="mi">1</span><span class="p">)</span>
+</pre></div>
+
+           </div>
+          </div>
+          <footer>
+
+  <hr/>
+
+  <div role="contentinfo">
+    <p>&#169; Copyright 2026, Cameron Ela.</p>
+  </div>
+
+  Built with <a href="https://www.sphinx-doc.org/">Sphinx</a> using a
+    <a href="https://github.com/readthedocs/sphinx_rtd_theme">theme</a>
+    provided by <a href="https://readthedocs.org">Read the Docs</a>.
+   
+
+</footer>
+        </div>
+      </div>
+    </section>
+  </div>
+  <script>
+      jQuery(function () {
+          SphinxRtdTheme.Navigation.enable(true);
+      });
+  </script> 
+
+</body>
+</html>

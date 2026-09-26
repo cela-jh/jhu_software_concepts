@@ -9,8 +9,10 @@ from .routes import bp
 
 def create_app():
     """
-    Builds the Flask app and registers its routes.
-    Returns the app.
+    Build the Flask app and register its routes.
+
+    :returns: A configured Flask application.
+    :rtype: flask.Flask
     """
     flask_app = Flask(__name__)
     flask_app.register_blueprint(bp)

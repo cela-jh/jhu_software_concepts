@@ -1,0 +1,798 @@
+
+
+<!DOCTYPE html>
+<html class="writer-html5" lang="en" data-content_root="../../">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>scraping.scrape &mdash; GradCafe Analytics 1.0 documentation</title>
+      <link rel="stylesheet" type="text/css" href="../../_static/pygments.css?v=b86133f3" />
+      <link rel="stylesheet" type="text/css" href="../../_static/css/theme.css?v=9edc463e" />
+
+  
+      <script src="../../_static/jquery.js?v=5d32c60e"></script>
+      <script src="../../_static/_sphinx_javascript_frameworks_compat.js?v=2cd50e6c"></script>
+      <script src="../../_static/documentation_options.js?v=f2a433a1"></script>
+      <script src="../../_static/doctools.js?v=fd6eb6e6"></script>
+      <script src="../../_static/sphinx_highlight.js?v=6ffebe34"></script>
+    <script src="../../_static/js/theme.js"></script>
+    <link rel="index" title="Index" href="../../genindex.html" />
+    <link rel="search" title="Search" href="../../search.html" /> 
+</head>
+
+<body class="wy-body-for-nav"> 
+  <div class="wy-grid-for-nav">
+    <nav data-toggle="wy-nav-shift" class="wy-nav-side">
+      <div class="wy-side-scroll">
+        <div class="wy-side-nav-search" >
+
+          
+          
+          <a href="../../index.html" class="icon icon-home">
+            GradCafe Analytics
+          </a>
+<div role="search">
+  <form id="rtd-search-form" class="wy-form" action="../../search.html" method="get">
+    <input type="text" name="q" placeholder="Search docs" aria-label="Search docs" />
+    <input type="hidden" name="check_keywords" value="yes" />
+    <input type="hidden" name="area" value="default" />
+  </form>
+</div>
+        </div><div class="wy-menu wy-menu-vertical" data-spy="affix" role="navigation" aria-label="Navigation menu">
+              <p class="caption" role="heading"><span class="caption-text">Contents:</span></p>
+<ul>
+<li class="toctree-l1"><a class="reference internal" href="../../overview_setup.html">Overview &amp; Setup</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../architecture.html">Architecture</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../modules/modules.html">API Reference</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../testing_guide.html">Testing Guide</a></li>
+</ul>
+
+        </div>
+      </div>
+    </nav>
+
+    <section data-toggle="wy-nav-shift" class="wy-nav-content-wrap"><nav class="wy-nav-top" aria-label="Mobile navigation menu" >
+          <i data-toggle="wy-nav-top" class="fa fa-bars"></i>
+          <a href="../../index.html">GradCafe Analytics</a>
+      </nav>
+
+      <div class="wy-nav-content">
+        <div class="rst-content">
+          <div role="navigation" aria-label="Page navigation">
+  <ul class="wy-breadcrumbs">
+      <li><a href="../../index.html" class="icon icon-home" aria-label="Home"></a></li>
+          <li class="breadcrumb-item"><a href="../index.html">Module code</a></li>
+      <li class="breadcrumb-item active">scraping.scrape</li>
+      <li class="wy-breadcrumbs-aside">
+      </li>
+  </ul>
+  <hr/>
+</div>
+          <div role="main" class="document" itemscope="itemscope" itemtype="http://schema.org/Article">
+           <div itemprop="articleBody">
+             
+  <h1>Source code for scraping.scrape</h1><div class="highlight"><pre>
+<span></span><span class="sd">"""</span>
+<span class="sd">`scrape.py`</span>
+<span class="sd">Scrapes admissions results from GradCafe into a JSON file. Run directly</span>
+<span class="sd">(`python scrape.py [options] [output.json]`) to scrape; `scrape_data` and</span>
+<span class="sd">the other functions here can also be imported on their own.</span>
+<span class="sd">"""</span>
+<span class="kn">import</span><span class="w"> </span><span class="nn">argparse</span>
+<span class="kn">import</span><span class="w"> </span><span class="nn">functools</span>
+<span class="kn">import</span><span class="w"> </span><span class="nn">signal</span>
+<span class="kn">import</span><span class="w"> </span><span class="nn">sys</span>
+<span class="kn">import</span><span class="w"> </span><span class="nn">time</span>
+<span class="kn">import</span><span class="w"> </span><span class="nn">random</span>
+<span class="kn">import</span><span class="w"> </span><span class="nn">tempfile</span>
+<span class="kn">import</span><span class="w"> </span><span class="nn">shutil</span>
+<span class="kn">import</span><span class="w"> </span><span class="nn">subprocess</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">pathlib</span><span class="w"> </span><span class="kn">import</span> <span class="n">Path</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">urllib.request</span><span class="w"> </span><span class="kn">import</span> <span class="n">urlopen</span><span class="p">,</span> <span class="n">Request</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">urllib.error</span><span class="w"> </span><span class="kn">import</span> <span class="n">HTTPError</span><span class="p">,</span> <span class="n">URLError</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">urllib.parse</span><span class="w"> </span><span class="kn">import</span> <span class="n">urljoin</span><span class="p">,</span> <span class="n">urlparse</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">urllib.robotparser</span><span class="w"> </span><span class="kn">import</span> <span class="n">RobotFileParser</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">selenium</span><span class="w"> </span><span class="kn">import</span> <span class="n">webdriver</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">selenium.webdriver.common.by</span><span class="w"> </span><span class="kn">import</span> <span class="n">By</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">selenium.common.exceptions</span><span class="w"> </span><span class="kn">import</span> <span class="n">NoSuchElementException</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">bs4</span><span class="w"> </span><span class="kn">import</span> <span class="n">BeautifulSoup</span>
+
+<span class="c1"># Ensures clean/storage resolve whether scrape.py is run directly or</span>
+<span class="c1"># imported as scraping.scrape from elsewhere in the package.</span>
+<span class="n">sys</span><span class="o">.</span><span class="n">path</span><span class="o">.</span><span class="n">insert</span><span class="p">(</span><span class="mi">0</span><span class="p">,</span> <span class="nb">str</span><span class="p">(</span><span class="n">Path</span><span class="p">(</span><span class="vm">__file__</span><span class="p">)</span><span class="o">.</span><span class="n">resolve</span><span class="p">()</span><span class="o">.</span><span class="n">parent</span><span class="p">))</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">clean</span><span class="w"> </span><span class="kn">import</span> <span class="n">clean_data</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">storage</span><span class="w"> </span><span class="kn">import</span> <span class="n">save_data</span><span class="p">,</span> <span class="n">validate_filepath</span><span class="p">,</span> <span class="n">save_state</span><span class="p">,</span> <span class="n">load_state</span><span class="p">,</span> <span class="n">load_existing_urls</span>
+
+<span class="c1"># paths.py is a sibling of scraping/, directly under src/.</span>
+<span class="n">sys</span><span class="o">.</span><span class="n">path</span><span class="o">.</span><span class="n">insert</span><span class="p">(</span><span class="mi">0</span><span class="p">,</span> <span class="nb">str</span><span class="p">(</span><span class="n">Path</span><span class="p">(</span><span class="vm">__file__</span><span class="p">)</span><span class="o">.</span><span class="n">resolve</span><span class="p">()</span><span class="o">.</span><span class="n">parent</span><span class="o">.</span><span class="n">parent</span><span class="p">))</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">paths</span><span class="w"> </span><span class="kn">import</span> <span class="n">DEFAULT_DATA_FILE</span><span class="p">,</span> <span class="n">state_path_for</span>
+
+<span class="c1"># Force every print() in this process to flush immediately for logging purposes.</span>
+<span class="c1"># Helps prevent making a script that is working look hung.</span>
+<span class="nb">print</span> <span class="o">=</span> <span class="n">functools</span><span class="o">.</span><span class="n">partial</span><span class="p">(</span><span class="nb">print</span><span class="p">,</span> <span class="n">flush</span><span class="o">=</span><span class="kc">True</span><span class="p">)</span>
+
+<span class="n">RESTART_EVERY_N_PAGES</span> <span class="o">=</span> <span class="mi">500</span>
+<span class="n">PULL_SEEN_LIMIT</span> <span class="o">=</span> <span class="mi">1000</span>
+
+
+<div class="viewcode-block" id="StopRequested">
+<a class="viewcode-back" href="../../modules/scraping.scrape.html#scraping.scrape.StopRequested">[docs]</a>
+<span class="k">class</span><span class="w"> </span><span class="nc">StopRequested</span><span class="p">(</span><span class="ne">BaseException</span><span class="p">):</span>
+<span class="w">    </span><span class="sd">"""</span>
+<span class="sd">    Raised when a SIGTERM asks a running scrape to stop cleanly. A</span>
+<span class="sd">    BaseException rather than an Exception, like KeyboardInterrupt, so it</span>
+<span class="sd">    isn't swallowed by the broad except-Exception retry loops throughout</span>
+<span class="sd">    this file.</span>
+<span class="sd">    """</span></div>
+
+
+
+<span class="k">def</span><span class="w"> </span><span class="nf">_handle_sigterm</span><span class="p">(</span><span class="n">signum</span><span class="p">,</span> <span class="n">frame</span><span class="p">):</span>
+    <span class="k">raise</span> <span class="n">StopRequested</span><span class="p">()</span>
+
+
+<div class="viewcode-block" id="create_profile_dir">
+<a class="viewcode-back" href="../../modules/scraping.scrape.html#scraping.scrape.create_profile_dir">[docs]</a>
+<span class="k">def</span><span class="w"> </span><span class="nf">create_profile_dir</span><span class="p">():</span>
+<span class="w">    </span><span class="sd">"""</span>
+<span class="sd">    Create a new temporary Chrome profile directory.</span>
+
+<span class="sd">    :returns: The profile directory's path.</span>
+<span class="sd">    :rtype: str</span>
+<span class="sd">    """</span>
+    <span class="k">return</span> <span class="n">tempfile</span><span class="o">.</span><span class="n">mkdtemp</span><span class="p">()</span></div>
+
+
+
+<span class="k">def</span><span class="w"> </span><span class="nf">_open_chrome</span><span class="p">(</span><span class="n">chrome_bin</span><span class="p">,</span> <span class="n">profile_dir</span><span class="p">):</span>
+<span class="w">    </span><span class="sd">"""</span>
+<span class="sd">    Open Chrome in remote debugging mode using given Chrome binary path</span>
+<span class="sd">    and a persistent profile directory.</span>
+
+<span class="sd">    :param chrome_bin: Path to the Chrome binary to launch.</span>
+<span class="sd">    :type chrome_bin: str or pathlib.Path</span>
+<span class="sd">    :param profile_dir: Path to the Chrome profile directory to use.</span>
+<span class="sd">    :type profile_dir: str</span>
+<span class="sd">    :returns: The Chrome process.</span>
+<span class="sd">    :rtype: subprocess.Popen</span>
+<span class="sd">    """</span>
+    <span class="n">chrome_process</span> <span class="o">=</span> <span class="n">subprocess</span><span class="o">.</span><span class="n">Popen</span><span class="p">(</span>
+        <span class="p">[</span>
+            <span class="n">chrome_bin</span><span class="p">,</span>
+            <span class="s2">"--remote-debugging-port=9222"</span><span class="p">,</span>
+            <span class="sa">f</span><span class="s2">"--user-data-dir=</span><span class="si">{</span><span class="n">profile_dir</span><span class="si">}</span><span class="s2">"</span><span class="p">,</span>
+            <span class="s2">"--no-first-run"</span><span class="p">,</span>
+            <span class="s2">"--no-default-browser-check"</span><span class="p">,</span>
+            <span class="s2">"--disable-sync"</span><span class="p">,</span>
+        <span class="p">],</span>
+        <span class="n">stdout</span><span class="o">=</span><span class="n">subprocess</span><span class="o">.</span><span class="n">DEVNULL</span><span class="p">,</span>
+        <span class="n">stderr</span><span class="o">=</span><span class="n">subprocess</span><span class="o">.</span><span class="n">DEVNULL</span>
+    <span class="p">)</span>
+    <span class="k">return</span> <span class="n">chrome_process</span>
+
+
+<span class="k">def</span><span class="w"> </span><span class="nf">_try_debug_endpoint</span><span class="p">(</span><span class="n">host_port</span><span class="p">,</span> <span class="n">retries</span><span class="o">=</span><span class="mi">10</span><span class="p">):</span>
+<span class="w">    </span><span class="sd">"""</span>
+<span class="sd">    Try opening the debugging endpoint until open or reaching number of</span>
+<span class="sd">    retries.</span>
+
+<span class="sd">    :param host_port: The debugging endpoint's base URL.</span>
+<span class="sd">    :type host_port: str</span>
+<span class="sd">    :param retries: How many times to retry before giving up.</span>
+<span class="sd">    :type retries: int</span>
+<span class="sd">    :returns: None.</span>
+<span class="sd">    :rtype: None</span>
+<span class="sd">    """</span>
+    <span class="k">for</span> <span class="n">_</span> <span class="ow">in</span> <span class="nb">range</span><span class="p">(</span><span class="n">retries</span><span class="p">):</span>
+        <span class="k">try</span><span class="p">:</span>
+            <span class="n">urlopen</span><span class="p">(</span><span class="n">urljoin</span><span class="p">(</span><span class="n">host_port</span><span class="p">,</span> <span class="s2">"json"</span><span class="p">),</span> <span class="n">timeout</span><span class="o">=</span><span class="mi">10</span><span class="p">)</span>
+            <span class="k">break</span>
+        <span class="k">except</span> <span class="n">URLError</span><span class="p">:</span>
+            <span class="n">time</span><span class="o">.</span><span class="n">sleep</span><span class="p">(</span><span class="mi">1</span><span class="p">)</span>
+
+
+<span class="k">def</span><span class="w"> </span><span class="nf">_init_webdriver</span><span class="p">(</span><span class="n">host_port</span><span class="p">):</span>
+<span class="w">    </span><span class="sd">"""</span>
+<span class="sd">    Create Chrome webdriver with remote debug options.</span>
+
+<span class="sd">    :param host_port: The debugging endpoint's host:port address.</span>
+<span class="sd">    :type host_port: str</span>
+<span class="sd">    :returns: The Chrome driver.</span>
+<span class="sd">    :rtype: selenium.webdriver.Chrome</span>
+<span class="sd">    """</span>
+    <span class="n">options</span> <span class="o">=</span> <span class="n">webdriver</span><span class="o">.</span><span class="n">ChromeOptions</span><span class="p">()</span>
+    <span class="n">options</span><span class="o">.</span><span class="n">debugger_address</span> <span class="o">=</span> <span class="n">host_port</span>
+    <span class="n">options</span><span class="o">.</span><span class="n">page_load_strategy</span> <span class="o">=</span> <span class="s2">"eager"</span>
+    <span class="n">options</span><span class="o">.</span><span class="n">add_experimental_option</span><span class="p">(</span><span class="s2">"prefs"</span><span class="p">,</span> <span class="p">{</span>
+        <span class="s2">"profile.managed_default_content_settings.images"</span><span class="p">:</span> <span class="mi">2</span>
+    <span class="p">})</span>
+    <span class="n">driver</span> <span class="o">=</span> <span class="n">webdriver</span><span class="o">.</span><span class="n">Chrome</span><span class="p">(</span><span class="n">options</span><span class="o">=</span><span class="n">options</span><span class="p">)</span>
+
+    <span class="k">return</span> <span class="n">driver</span>
+
+
+<div class="viewcode-block" id="terminate_process">
+<a class="viewcode-back" href="../../modules/scraping.scrape.html#scraping.scrape.terminate_process">[docs]</a>
+<span class="k">def</span><span class="w"> </span><span class="nf">terminate_process</span><span class="p">(</span><span class="n">process</span><span class="p">,</span> <span class="n">timeout</span><span class="o">=</span><span class="mi">10</span><span class="p">):</span>
+<span class="w">    </span><span class="sd">"""</span>
+<span class="sd">    Terminate the given Chrome process, force-killing it if it doesn't</span>
+<span class="sd">    respond to termination within the timeout. Does not remove the</span>
+<span class="sd">    profile directory, since it may be reused across restarts.</span>
+
+<span class="sd">    :param process: The Chrome process to terminate.</span>
+<span class="sd">    :type process: subprocess.Popen</span>
+<span class="sd">    :param timeout: Seconds to wait for a clean exit before killing it.</span>
+<span class="sd">    :type timeout: int</span>
+<span class="sd">    :returns: None.</span>
+<span class="sd">    :rtype: None</span>
+<span class="sd">    """</span>
+    <span class="n">process</span><span class="o">.</span><span class="n">terminate</span><span class="p">()</span>
+    <span class="k">try</span><span class="p">:</span>
+        <span class="n">process</span><span class="o">.</span><span class="n">wait</span><span class="p">(</span><span class="n">timeout</span><span class="o">=</span><span class="n">timeout</span><span class="p">)</span>
+    <span class="k">except</span> <span class="n">subprocess</span><span class="o">.</span><span class="n">TimeoutExpired</span><span class="p">:</span>
+        <span class="n">process</span><span class="o">.</span><span class="n">kill</span><span class="p">()</span>
+        <span class="n">process</span><span class="o">.</span><span class="n">wait</span><span class="p">(</span><span class="n">timeout</span><span class="o">=</span><span class="n">timeout</span><span class="p">)</span></div>
+
+
+
+<div class="viewcode-block" id="cleanup_profile">
+<a class="viewcode-back" href="../../modules/scraping.scrape.html#scraping.scrape.cleanup_profile">[docs]</a>
+<span class="k">def</span><span class="w"> </span><span class="nf">cleanup_profile</span><span class="p">(</span><span class="n">profile_dir</span><span class="p">):</span>
+<span class="w">    </span><span class="sd">"""</span>
+<span class="sd">    Remove the given Chrome profile directory. Call only once the</span>
+<span class="sd">    profile is done being reused (i.e. scraping has fully finished).</span>
+
+<span class="sd">    :param profile_dir: Path to the Chrome profile directory to remove.</span>
+<span class="sd">    :type profile_dir: str</span>
+<span class="sd">    :returns: None.</span>
+<span class="sd">    :rtype: None</span>
+<span class="sd">    """</span>
+    <span class="n">shutil</span><span class="o">.</span><span class="n">rmtree</span><span class="p">(</span><span class="n">profile_dir</span><span class="p">)</span></div>
+
+
+
+<span class="n">CLOUDFLARE_WAIT_TIMEOUT</span> <span class="o">=</span> <span class="mi">300</span>
+<span class="n">CLOUDFLARE_POLL_INTERVAL</span> <span class="o">=</span> <span class="mi">3</span>
+
+
+<span class="k">def</span><span class="w"> </span><span class="nf">_wait_for_cloudflare</span><span class="p">(</span><span class="n">driver</span><span class="p">,</span> <span class="n">timeout</span><span class="o">=</span><span class="n">CLOUDFLARE_WAIT_TIMEOUT</span><span class="p">,</span> <span class="n">poll_interval</span><span class="o">=</span><span class="n">CLOUDFLARE_POLL_INTERVAL</span><span class="p">):</span>
+<span class="w">    </span><span class="sd">"""</span>
+<span class="sd">    Wait for a human to clear Cloudflare's challenge in the visible</span>
+<span class="sd">    Chrome window, polling the page title instead of blocking on</span>
+<span class="sd">    keyboard input, so this works whether scrape.py is run directly or</span>
+<span class="sd">    as a subprocess with no interactive terminal to type into.</span>
+
+<span class="sd">    :param driver: The active Selenium Chrome driver.</span>
+<span class="sd">    :type driver: selenium.webdriver.Chrome</span>
+<span class="sd">    :param timeout: Seconds to wait before giving up.</span>
+<span class="sd">    :type timeout: int</span>
+<span class="sd">    :param poll_interval: Seconds between checks of the page title.</span>
+<span class="sd">    :type poll_interval: int</span>
+<span class="sd">    :raises TimeoutError: If the challenge isn't cleared within timeout.</span>
+<span class="sd">    :returns: None.</span>
+<span class="sd">    :rtype: None</span>
+<span class="sd">    """</span>
+    <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">"Cloudflare check shown; complete it in the browser window. "</span>
+          <span class="sa">f</span><span class="s2">"Waiting up to </span><span class="si">{</span><span class="n">timeout</span><span class="si">}</span><span class="s2">s..."</span><span class="p">)</span>
+    <span class="n">waited</span> <span class="o">=</span> <span class="mi">0</span>
+    <span class="k">while</span> <span class="s2">"Just a moment"</span> <span class="ow">in</span> <span class="n">driver</span><span class="o">.</span><span class="n">title</span><span class="p">:</span>
+        <span class="n">time</span><span class="o">.</span><span class="n">sleep</span><span class="p">(</span><span class="n">poll_interval</span><span class="p">)</span>
+        <span class="n">waited</span> <span class="o">+=</span> <span class="n">poll_interval</span>
+        <span class="k">if</span> <span class="n">waited</span> <span class="o">&gt;=</span> <span class="n">timeout</span><span class="p">:</span>
+            <span class="k">raise</span> <span class="ne">TimeoutError</span><span class="p">(</span><span class="s2">"Cloudflare check was not completed in time."</span><span class="p">)</span>
+    <span class="nb">print</span><span class="p">(</span><span class="s2">"Cloudflare check cleared; continuing."</span><span class="p">)</span>
+
+
+<span class="n">AD_TRACKER_URL_PATTERNS</span> <span class="o">=</span> <span class="p">[</span>
+    <span class="s2">"*doubleclick.net*"</span><span class="p">,</span>
+    <span class="s2">"*googlesyndication.com*"</span><span class="p">,</span>
+    <span class="s2">"*adthrive.com*"</span><span class="p">,</span>
+    <span class="s2">"*pubmatic.com*"</span><span class="p">,</span>
+    <span class="s2">"*rubiconproject.com*"</span><span class="p">,</span>
+    <span class="s2">"*casalemedia.com*"</span><span class="p">,</span>
+    <span class="s2">"*openx.net*"</span><span class="p">,</span>
+    <span class="s2">"*3lift.com*"</span><span class="p">,</span>
+    <span class="s2">"*onetag-sys.com*"</span><span class="p">,</span>
+    <span class="s2">"*presage.io*"</span><span class="p">,</span>
+    <span class="s2">"*tapad.com*"</span><span class="p">,</span>
+    <span class="s2">"*creativecdn.com*"</span><span class="p">,</span>
+    <span class="s2">"*deepintent.com*"</span><span class="p">,</span>
+    <span class="s2">"*bidr.io*"</span><span class="p">,</span>
+    <span class="s2">"*smartadserver.com*"</span><span class="p">,</span>
+    <span class="s2">"*2mdn.net*"</span><span class="p">,</span>
+    <span class="s2">"*adtrafficquality.google*"</span><span class="p">,</span>
+    <span class="s2">"*temu.com*"</span><span class="p">,</span>
+    <span class="s2">"*recaptcha*"</span><span class="p">,</span>
+<span class="p">]</span>
+
+
+<span class="k">def</span><span class="w"> </span><span class="nf">_block_ad_trackers</span><span class="p">(</span><span class="n">driver</span><span class="p">):</span>
+<span class="w">    </span><span class="sd">"""</span>
+<span class="sd">    Block known ad and real-time-bidding tracker requests via Chrome</span>
+<span class="sd">    DevTools Protocol. GradCafe's page loads dozens of ad-auction and</span>
+<span class="sd">    cookie-sync iframes on every visit; since a fresh, cookie-less Chrome</span>
+<span class="sd">    profile is used for every scrape (needed for the Cloudflare</span>
+<span class="sd">    workaround), this full ad auction re-runs from scratch every time,</span>
+<span class="sd">    spawning enough renderer processes to stall the page for minutes.</span>
+<span class="sd">    None of this is needed to read the results table.</span>
+
+<span class="sd">    :param driver: The active Selenium Chrome driver.</span>
+<span class="sd">    :type driver: selenium.webdriver.Chrome</span>
+<span class="sd">    :returns: None.</span>
+<span class="sd">    :rtype: None</span>
+<span class="sd">    """</span>
+    <span class="n">driver</span><span class="o">.</span><span class="n">execute_cdp_cmd</span><span class="p">(</span><span class="s2">"Network.enable"</span><span class="p">,</span> <span class="p">{})</span>
+    <span class="n">driver</span><span class="o">.</span><span class="n">execute_cdp_cmd</span><span class="p">(</span><span class="s2">"Network.setBlockedURLs"</span><span class="p">,</span> <span class="p">{</span><span class="s2">"urls"</span><span class="p">:</span> <span class="n">AD_TRACKER_URL_PATTERNS</span><span class="p">})</span>
+
+
+<div class="viewcode-block" id="chrome_helper">
+<a class="viewcode-back" href="../../modules/scraping.scrape.html#scraping.scrape.chrome_helper">[docs]</a>
+<span class="k">def</span><span class="w"> </span><span class="nf">chrome_helper</span><span class="p">(</span><span class="n">url</span><span class="p">,</span> <span class="n">host_port</span><span class="p">,</span> <span class="n">chrome_bin</span><span class="p">,</span> <span class="n">profile_dir</span><span class="p">,</span> <span class="n">retries</span><span class="o">=</span><span class="mi">5</span><span class="p">,</span> <span class="n">base_retry_delay</span><span class="o">=</span><span class="mi">15</span><span class="p">):</span>
+<span class="w">    </span><span class="sd">"""</span>
+<span class="sd">    Work around Cloudflare verification at url (GradCafe), using a</span>
+<span class="sd">    persistent Chrome profile so a cleared session survives restarts.</span>
+<span class="sd">    Retries the initial navigation on transient errors, then only waits</span>
+<span class="sd">    for manual completion if a Cloudflare challenge is actually shown.</span>
+<span class="sd">    Cleans up its own spawned process if initialization fails partway</span>
+<span class="sd">    through.</span>
+
+<span class="sd">    :param url: The URL to navigate to.</span>
+<span class="sd">    :type url: str</span>
+<span class="sd">    :param host_port: The debugging endpoint's host:port address.</span>
+<span class="sd">    :type host_port: str</span>
+<span class="sd">    :param chrome_bin: Path to the Chrome binary to launch.</span>
+<span class="sd">    :type chrome_bin: str or pathlib.Path</span>
+<span class="sd">    :param profile_dir: Path to the Chrome profile directory to use.</span>
+<span class="sd">    :type profile_dir: str</span>
+<span class="sd">    :param retries: How many times to retry the initial navigation.</span>
+<span class="sd">    :type retries: int</span>
+<span class="sd">    :param base_retry_delay: Base delay in seconds between retries,</span>
+<span class="sd">        doubled on each subsequent attempt.</span>
+<span class="sd">    :type base_retry_delay: int</span>
+<span class="sd">    :returns: The resulting driver and Chrome process.</span>
+<span class="sd">    :rtype: tuple(selenium.webdriver.Chrome, subprocess.Popen)</span>
+<span class="sd">    """</span>
+    <span class="n">chrome_process</span> <span class="o">=</span> <span class="n">_open_chrome</span><span class="p">(</span><span class="n">chrome_bin</span><span class="p">,</span> <span class="n">profile_dir</span><span class="p">)</span>
+    <span class="k">try</span><span class="p">:</span>
+        <span class="n">http_host</span> <span class="o">=</span> <span class="s2">"http://"</span> <span class="o">+</span> <span class="n">host_port</span>
+        <span class="n">_try_debug_endpoint</span><span class="p">(</span><span class="n">http_host</span><span class="p">)</span>
+        <span class="n">driver</span> <span class="o">=</span> <span class="n">_init_webdriver</span><span class="p">(</span><span class="n">host_port</span><span class="p">)</span>
+        <span class="n">_block_ad_trackers</span><span class="p">(</span><span class="n">driver</span><span class="p">)</span>
+
+        <span class="nb">print</span><span class="p">(</span><span class="s2">"Loading GradCafe..."</span><span class="p">)</span>
+        <span class="k">for</span> <span class="n">attempt</span> <span class="ow">in</span> <span class="nb">range</span><span class="p">(</span><span class="mi">1</span><span class="p">,</span> <span class="n">retries</span> <span class="o">+</span> <span class="mi">1</span><span class="p">):</span>
+            <span class="k">try</span><span class="p">:</span>
+                <span class="n">driver</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="n">url</span><span class="p">)</span>
+                <span class="k">break</span>
+            <span class="k">except</span> <span class="ne">Exception</span> <span class="k">as</span> <span class="n">e</span><span class="p">:</span>
+                <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">"Initial page load failed (attempt </span><span class="si">{</span><span class="n">attempt</span><span class="si">}</span><span class="s2">/</span><span class="si">{</span><span class="n">retries</span><span class="si">}</span><span class="s2">): </span><span class="si">{</span><span class="n">e</span><span class="si">}</span><span class="s2">"</span><span class="p">)</span>
+                <span class="k">if</span> <span class="n">attempt</span> <span class="o">==</span> <span class="n">retries</span><span class="p">:</span>
+                    <span class="k">raise</span>
+                <span class="n">retry_delay</span> <span class="o">=</span> <span class="n">base_retry_delay</span> <span class="o">*</span> <span class="p">(</span><span class="mi">2</span> <span class="o">**</span> <span class="p">(</span><span class="n">attempt</span> <span class="o">-</span> <span class="mi">1</span><span class="p">))</span>
+                <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">"Retrying in </span><span class="si">{</span><span class="n">retry_delay</span><span class="si">}</span><span class="s2">s..."</span><span class="p">)</span>
+                <span class="n">time</span><span class="o">.</span><span class="n">sleep</span><span class="p">(</span><span class="n">retry_delay</span><span class="p">)</span>
+
+        <span class="k">if</span> <span class="s2">"Just a moment"</span> <span class="ow">in</span> <span class="n">driver</span><span class="o">.</span><span class="n">title</span><span class="p">:</span>
+            <span class="n">_wait_for_cloudflare</span><span class="p">(</span><span class="n">driver</span><span class="p">)</span>
+    <span class="k">except</span> <span class="ne">Exception</span><span class="p">:</span>
+        <span class="n">terminate_process</span><span class="p">(</span><span class="n">chrome_process</span><span class="p">)</span>
+        <span class="k">raise</span>
+
+    <span class="k">return</span> <span class="n">driver</span><span class="p">,</span> <span class="n">chrome_process</span></div>
+
+
+
+<div class="viewcode-block" id="check_robots_allowed">
+<a class="viewcode-back" href="../../modules/scraping.scrape.html#scraping.scrape.check_robots_allowed">[docs]</a>
+<span class="k">def</span><span class="w"> </span><span class="nf">check_robots_allowed</span><span class="p">(</span><span class="n">url</span><span class="p">,</span> <span class="n">user_agent</span><span class="o">=</span><span class="s2">"*"</span><span class="p">):</span>
+<span class="w">    </span><span class="sd">"""</span>
+<span class="sd">    Check the site's robots.txt to see if scraping is permitted on the</span>
+<span class="sd">    domain. Fetches it with a browser-like User-Agent, since Cloudflare</span>
+<span class="sd">    returns a 403 for RobotFileParser's default "Python-urllib/x.y" UA -</span>
+<span class="sd">    which robotparser's read() treats as "disallow everything" rather</span>
+<span class="sd">    than as a fetch failure.</span>
+
+<span class="sd">    :param url: The URL to check permission for.</span>
+<span class="sd">    :type url: str</span>
+<span class="sd">    :param user_agent: The user agent to check permission for.</span>
+<span class="sd">    :type user_agent: str</span>
+<span class="sd">    :returns: True if allowed, else False.</span>
+<span class="sd">    :rtype: bool</span>
+<span class="sd">    """</span>
+    <span class="n">parsed</span> <span class="o">=</span> <span class="n">urlparse</span><span class="p">(</span><span class="n">url</span><span class="p">)</span>
+    <span class="n">robots_url</span> <span class="o">=</span> <span class="sa">f</span><span class="s2">"</span><span class="si">{</span><span class="n">parsed</span><span class="o">.</span><span class="n">scheme</span><span class="si">}</span><span class="s2">://</span><span class="si">{</span><span class="n">parsed</span><span class="o">.</span><span class="n">netloc</span><span class="si">}</span><span class="s2">/robots.txt"</span>
+
+    <span class="n">request</span> <span class="o">=</span> <span class="n">Request</span><span class="p">(</span><span class="n">robots_url</span><span class="p">,</span> <span class="n">headers</span><span class="o">=</span><span class="p">{</span><span class="s2">"User-Agent"</span><span class="p">:</span> <span class="s2">"Mozilla/5.0"</span><span class="p">})</span>
+    <span class="k">with</span> <span class="n">urlopen</span><span class="p">(</span><span class="n">request</span><span class="p">)</span> <span class="k">as</span> <span class="n">response</span><span class="p">:</span>
+        <span class="n">lines</span> <span class="o">=</span> <span class="n">response</span><span class="o">.</span><span class="n">read</span><span class="p">()</span><span class="o">.</span><span class="n">decode</span><span class="p">(</span><span class="s2">"utf-8"</span><span class="p">)</span><span class="o">.</span><span class="n">splitlines</span><span class="p">()</span>
+
+    <span class="n">robots_parser</span> <span class="o">=</span> <span class="n">RobotFileParser</span><span class="p">()</span>
+    <span class="n">robots_parser</span><span class="o">.</span><span class="n">set_url</span><span class="p">(</span><span class="n">robots_url</span><span class="p">)</span>
+    <span class="n">robots_parser</span><span class="o">.</span><span class="n">parse</span><span class="p">(</span><span class="n">lines</span><span class="p">)</span>
+
+    <span class="k">return</span> <span class="n">robots_parser</span><span class="o">.</span><span class="n">can_fetch</span><span class="p">(</span><span class="n">user_agent</span><span class="p">,</span> <span class="n">url</span><span class="p">)</span></div>
+
+
+
+<span class="k">def</span><span class="w"> </span><span class="nf">_get_page</span><span class="p">(</span><span class="n">driver</span><span class="p">,</span> <span class="n">url</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span> <span class="n">wait</span><span class="o">=</span><span class="mi">2</span><span class="p">,</span> <span class="n">retries</span><span class="o">=</span><span class="mi">5</span><span class="p">,</span> <span class="n">base_retry_delay</span><span class="o">=</span><span class="mi">15</span><span class="p">):</span>
+<span class="w">    </span><span class="sd">"""</span>
+<span class="sd">    Load a page either by navigating to `url` directly, or, if url is</span>
+<span class="sd">    None, by using whatever page is currently loaded (like after</span>
+<span class="sd">    clicking "Next"). Retries by re-navigating (or refreshing) on</span>
+<span class="sd">    transient errors or unexpected page content, with an exponentially</span>
+<span class="sd">    growing delay between attempts, and a randomized polling delay once</span>
+<span class="sd">    successful.</span>
+
+<span class="sd">    :param driver: The active Selenium Chrome driver.</span>
+<span class="sd">    :type driver: selenium.webdriver.Chrome</span>
+<span class="sd">    :param url: The URL to navigate to, or None to use the current page.</span>
+<span class="sd">    :type url: str or None</span>
+<span class="sd">    :param wait: Base seconds to politely wait after a successful load.</span>
+<span class="sd">    :type wait: float</span>
+<span class="sd">    :param retries: How many times to retry on failure.</span>
+<span class="sd">    :type retries: int</span>
+<span class="sd">    :param base_retry_delay: Base delay in seconds between retries,</span>
+<span class="sd">        doubled on each subsequent attempt.</span>
+<span class="sd">    :type base_retry_delay: int</span>
+<span class="sd">    :returns: The parsed page.</span>
+<span class="sd">    :rtype: bs4.BeautifulSoup</span>
+<span class="sd">    """</span>
+    <span class="n">soup</span> <span class="o">=</span> <span class="kc">None</span>
+    <span class="k">for</span> <span class="n">attempt</span> <span class="ow">in</span> <span class="nb">range</span><span class="p">(</span><span class="mi">1</span><span class="p">,</span> <span class="n">retries</span> <span class="o">+</span> <span class="mi">1</span><span class="p">):</span>
+        <span class="k">try</span><span class="p">:</span>
+            <span class="k">if</span> <span class="n">url</span> <span class="ow">is</span> <span class="ow">not</span> <span class="kc">None</span><span class="p">:</span>
+                <span class="n">driver</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="n">url</span><span class="p">)</span>
+            <span class="n">candidate</span> <span class="o">=</span> <span class="n">BeautifulSoup</span><span class="p">(</span><span class="n">driver</span><span class="o">.</span><span class="n">page_source</span><span class="p">,</span> <span class="s2">"html.parser"</span><span class="p">)</span>
+            <span class="k">if</span> <span class="n">candidate</span><span class="o">.</span><span class="n">find</span><span class="p">(</span><span class="s2">"tbody"</span><span class="p">)</span> <span class="ow">is</span> <span class="kc">None</span><span class="p">:</span>
+                <span class="k">raise</span> <span class="ne">RuntimeError</span><span class="p">(</span><span class="sa">f</span><span class="s2">"Results table not found (page title: '</span><span class="si">{</span><span class="n">driver</span><span class="o">.</span><span class="n">title</span><span class="si">}</span><span class="s2">')."</span><span class="p">)</span>
+            <span class="n">soup</span> <span class="o">=</span> <span class="n">candidate</span>
+            <span class="k">break</span>
+        <span class="k">except</span> <span class="n">HTTPError</span> <span class="k">as</span> <span class="n">e</span><span class="p">:</span>
+            <span class="nb">print</span><span class="p">(</span><span class="s2">"HTTP Error:"</span><span class="p">,</span> <span class="n">e</span><span class="o">.</span><span class="n">code</span><span class="p">)</span>
+            <span class="n">sys</span><span class="o">.</span><span class="n">exit</span><span class="p">(</span><span class="mi">1</span><span class="p">)</span>
+        <span class="k">except</span> <span class="ne">Exception</span> <span class="k">as</span> <span class="n">e</span><span class="p">:</span>
+            <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">"Page load failed (attempt </span><span class="si">{</span><span class="n">attempt</span><span class="si">}</span><span class="s2">/</span><span class="si">{</span><span class="n">retries</span><span class="si">}</span><span class="s2">): </span><span class="si">{</span><span class="n">e</span><span class="si">}</span><span class="s2">"</span><span class="p">)</span>
+            <span class="k">if</span> <span class="n">attempt</span> <span class="o">==</span> <span class="n">retries</span><span class="p">:</span>
+                <span class="k">raise</span>
+            <span class="n">retry_delay</span> <span class="o">=</span> <span class="n">base_retry_delay</span> <span class="o">*</span> <span class="p">(</span><span class="mi">2</span> <span class="o">**</span> <span class="p">(</span><span class="n">attempt</span> <span class="o">-</span> <span class="mi">1</span><span class="p">))</span>
+            <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">"Retrying in </span><span class="si">{</span><span class="n">retry_delay</span><span class="si">}</span><span class="s2">s..."</span><span class="p">)</span>
+            <span class="n">time</span><span class="o">.</span><span class="n">sleep</span><span class="p">(</span><span class="n">retry_delay</span><span class="p">)</span>
+            <span class="k">if</span> <span class="n">url</span> <span class="ow">is</span> <span class="kc">None</span><span class="p">:</span>
+                <span class="n">driver</span><span class="o">.</span><span class="n">refresh</span><span class="p">()</span>
+
+    <span class="n">time</span><span class="o">.</span><span class="n">sleep</span><span class="p">(</span><span class="n">random</span><span class="o">.</span><span class="n">uniform</span><span class="p">(</span><span class="n">wait</span> <span class="o">*</span> <span class="mf">0.7</span><span class="p">,</span> <span class="n">wait</span> <span class="o">*</span> <span class="mf">1.3</span><span class="p">))</span>    <span class="c1">#  add polite, jittered polling time</span>
+
+    <span class="k">return</span> <span class="n">soup</span>
+
+
+<span class="k">def</span><span class="w"> </span><span class="nf">_click_next_page</span><span class="p">(</span><span class="n">driver</span><span class="p">,</span> <span class="n">retries</span><span class="o">=</span><span class="mi">5</span><span class="p">,</span> <span class="n">base_retry_delay</span><span class="o">=</span><span class="mi">15</span><span class="p">,</span>
+                      <span class="n">missing_link_retries</span><span class="o">=</span><span class="mi">3</span><span class="p">,</span> <span class="n">missing_link_delay</span><span class="o">=</span><span class="mi">5</span><span class="p">):</span>
+<span class="w">    </span><span class="sd">"""</span>
+<span class="sd">    Find and click the "Next" pagination link via JavaScript so</span>
+<span class="sd">    navigation carries a natural Referer header and isn't blocked by</span>
+<span class="sd">    overlapping page elements that would intercept a native mouse</span>
+<span class="sd">    click. Retries on transient WebDriver command failures.</span>
+
+<span class="sd">    Not finding the "Next" link is retried with a short wait and a page</span>
+<span class="sd">    refresh up to missing_link_retries times in case the page has not</span>
+<span class="sd">    loaded yet.</span>
+
+<span class="sd">    :param driver: The active Selenium Chrome driver.</span>
+<span class="sd">    :type driver: selenium.webdriver.Chrome</span>
+<span class="sd">    :param retries: How many times to retry on a WebDriver failure.</span>
+<span class="sd">    :type retries: int</span>
+<span class="sd">    :param base_retry_delay: Base delay in seconds between retries,</span>
+<span class="sd">        doubled on each subsequent attempt.</span>
+<span class="sd">    :type base_retry_delay: int</span>
+<span class="sd">    :param missing_link_retries: How many times to retry when the</span>
+<span class="sd">        "Next" link isn't found yet.</span>
+<span class="sd">    :type missing_link_retries: int</span>
+<span class="sd">    :param missing_link_delay: Base delay in seconds between missing-</span>
+<span class="sd">        link retries, doubled on each subsequent attempt.</span>
+<span class="sd">    :type missing_link_delay: int</span>
+<span class="sd">    :returns: The resulting page's URL, or None if no next page exists</span>
+<span class="sd">        after exhausting missing_link_retries.</span>
+<span class="sd">    :rtype: str or None</span>
+<span class="sd">    """</span>
+    <span class="k">for</span> <span class="n">attempt</span> <span class="ow">in</span> <span class="nb">range</span><span class="p">(</span><span class="mi">1</span><span class="p">,</span> <span class="n">retries</span> <span class="o">+</span> <span class="mi">1</span><span class="p">):</span>
+        <span class="k">try</span><span class="p">:</span>
+            <span class="n">next_link</span> <span class="o">=</span> <span class="kc">None</span>
+            <span class="k">for</span> <span class="n">missing_attempt</span> <span class="ow">in</span> <span class="nb">range</span><span class="p">(</span><span class="mi">1</span><span class="p">,</span> <span class="n">missing_link_retries</span> <span class="o">+</span> <span class="mi">1</span><span class="p">):</span>
+                <span class="k">try</span><span class="p">:</span>
+                    <span class="n">next_link</span> <span class="o">=</span> <span class="n">driver</span><span class="o">.</span><span class="n">find_element</span><span class="p">(</span>
+                        <span class="n">By</span><span class="o">.</span><span class="n">XPATH</span><span class="p">,</span> <span class="s1">'//nav[@aria-label="Results pagination"]//a[normalize-space(text())="Next"]'</span>
+                    <span class="p">)</span>
+                    <span class="k">break</span>
+                <span class="k">except</span> <span class="n">NoSuchElementException</span><span class="p">:</span>
+                    <span class="k">if</span> <span class="n">missing_attempt</span> <span class="o">==</span> <span class="n">missing_link_retries</span><span class="p">:</span>
+                        <span class="k">return</span> <span class="kc">None</span>
+                    <span class="n">delay</span> <span class="o">=</span> <span class="n">missing_link_delay</span> <span class="o">*</span> <span class="p">(</span><span class="mi">2</span> <span class="o">**</span> <span class="p">(</span><span class="n">missing_attempt</span> <span class="o">-</span> <span class="mi">1</span><span class="p">))</span>
+                    <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">"'Next' link not found (check </span><span class="si">{</span><span class="n">missing_attempt</span><span class="si">}</span><span class="s2">/</span><span class="si">{</span><span class="n">missing_link_retries</span><span class="si">}</span><span class="s2">); "</span>
+                          <span class="sa">f</span><span class="s2">"refreshing and re-checking in </span><span class="si">{</span><span class="n">delay</span><span class="si">}</span><span class="s2">s before assuming no more pages..."</span><span class="p">)</span>
+                    <span class="n">driver</span><span class="o">.</span><span class="n">refresh</span><span class="p">()</span>
+                    <span class="n">time</span><span class="o">.</span><span class="n">sleep</span><span class="p">(</span><span class="n">delay</span><span class="p">)</span>
+
+            <span class="n">driver</span><span class="o">.</span><span class="n">execute_script</span><span class="p">(</span><span class="s2">"arguments[0].click();"</span><span class="p">,</span> <span class="n">next_link</span><span class="p">)</span>
+            <span class="k">return</span> <span class="n">driver</span><span class="o">.</span><span class="n">current_url</span>
+        <span class="k">except</span> <span class="ne">Exception</span> <span class="k">as</span> <span class="n">e</span><span class="p">:</span>
+            <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">"Click 'Next' failed (attempt </span><span class="si">{</span><span class="n">attempt</span><span class="si">}</span><span class="s2">/</span><span class="si">{</span><span class="n">retries</span><span class="si">}</span><span class="s2">): </span><span class="si">{</span><span class="n">e</span><span class="si">}</span><span class="s2">"</span><span class="p">)</span>
+            <span class="k">if</span> <span class="n">attempt</span> <span class="o">==</span> <span class="n">retries</span><span class="p">:</span>
+                <span class="k">raise</span>
+            <span class="n">retry_delay</span> <span class="o">=</span> <span class="n">base_retry_delay</span> <span class="o">*</span> <span class="p">(</span><span class="mi">2</span> <span class="o">**</span> <span class="p">(</span><span class="n">attempt</span> <span class="o">-</span> <span class="mi">1</span><span class="p">))</span>
+            <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">"Retrying in </span><span class="si">{</span><span class="n">retry_delay</span><span class="si">}</span><span class="s2">s..."</span><span class="p">)</span>
+            <span class="n">time</span><span class="o">.</span><span class="n">sleep</span><span class="p">(</span><span class="n">retry_delay</span><span class="p">)</span>
+
+
+<div class="viewcode-block" id="scrape_data">
+<a class="viewcode-back" href="../../modules/scraping.scrape.html#scraping.scrape.scrape_data">[docs]</a>
+<span class="k">def</span><span class="w"> </span><span class="nf">scrape_data</span><span class="p">(</span><span class="n">driver</span><span class="p">,</span> <span class="n">url</span><span class="o">=</span><span class="kc">None</span><span class="p">):</span>
+<span class="w">    </span><span class="sd">"""</span>
+<span class="sd">    Scrape admissions results from the page at `url`, or from whatever</span>
+<span class="sd">    page is currently loaded if url is None. Clicks "Next" afterward so</span>
+<span class="sd">    the following page's request carries a natural Referer.</span>
+
+<span class="sd">    :param driver: The active Selenium Chrome driver.</span>
+<span class="sd">    :type driver: selenium.webdriver.Chrome</span>
+<span class="sd">    :param url: The URL to navigate to, or None to use the current page.</span>
+<span class="sd">    :type url: str or None</span>
+<span class="sd">    :returns: A list of Tag objects, each being a row with application</span>
+<span class="sd">        details, and the next page's URL (for resumable state), or None</span>
+<span class="sd">        if no next page exists.</span>
+<span class="sd">    :rtype: tuple(list[bs4.Tag], str or None)</span>
+<span class="sd">    """</span>
+    <span class="n">soup</span> <span class="o">=</span> <span class="n">_get_page</span><span class="p">(</span><span class="n">driver</span><span class="p">,</span> <span class="n">url</span><span class="p">)</span>
+    <span class="n">table</span> <span class="o">=</span> <span class="n">soup</span><span class="o">.</span><span class="n">find</span><span class="p">(</span><span class="s2">"tbody"</span><span class="p">)</span>
+    <span class="n">results</span> <span class="o">=</span> <span class="n">table</span><span class="o">.</span><span class="n">find_all</span><span class="p">(</span><span class="s2">"tr"</span><span class="p">)</span>
+    <span class="n">next_page_url</span> <span class="o">=</span> <span class="n">_click_next_page</span><span class="p">(</span><span class="n">driver</span><span class="p">)</span>
+
+    <span class="k">return</span> <span class="n">results</span><span class="p">,</span> <span class="n">next_page_url</span></div>
+
+
+
+<div class="viewcode-block" id="format_duration">
+<a class="viewcode-back" href="../../modules/scraping.scrape.html#scraping.scrape.format_duration">[docs]</a>
+<span class="k">def</span><span class="w"> </span><span class="nf">format_duration</span><span class="p">(</span><span class="n">seconds</span><span class="p">):</span>
+<span class="w">    </span><span class="sd">"""</span>
+<span class="sd">    Convert seconds to hours, minutes, seconds for loop/script</span>
+<span class="sd">    execution.</span>
+
+<span class="sd">    :param seconds: The duration to format.</span>
+<span class="sd">    :type seconds: float</span>
+<span class="sd">    :returns: The formatted duration.</span>
+<span class="sd">    :rtype: str</span>
+<span class="sd">    """</span>
+    <span class="n">hours</span><span class="p">,</span> <span class="n">remainder</span> <span class="o">=</span> <span class="nb">divmod</span><span class="p">(</span><span class="nb">int</span><span class="p">(</span><span class="n">seconds</span><span class="p">),</span> <span class="mi">3600</span><span class="p">)</span>
+    <span class="n">minutes</span><span class="p">,</span> <span class="n">secs</span> <span class="o">=</span> <span class="nb">divmod</span><span class="p">(</span><span class="n">remainder</span><span class="p">,</span> <span class="mi">60</span><span class="p">)</span>
+
+    <span class="k">if</span> <span class="n">minutes</span> <span class="o">==</span> <span class="mi">0</span> <span class="ow">and</span> <span class="n">hours</span> <span class="o">==</span> <span class="mi">0</span><span class="p">:</span>
+        <span class="k">return</span> <span class="sa">f</span><span class="s2">"</span><span class="si">{</span><span class="n">secs</span><span class="si">}</span><span class="s2">s"</span>
+    <span class="k">elif</span> <span class="n">minutes</span> <span class="o">&gt;</span> <span class="mi">0</span> <span class="ow">and</span> <span class="n">hours</span> <span class="o">==</span> <span class="mi">0</span><span class="p">:</span>
+        <span class="k">return</span> <span class="sa">f</span><span class="s2">"</span><span class="si">{</span><span class="n">minutes</span><span class="si">}</span><span class="s2">m </span><span class="si">{</span><span class="n">secs</span><span class="si">}</span><span class="s2">s"</span>
+
+    <span class="k">return</span> <span class="sa">f</span><span class="s2">"</span><span class="si">{</span><span class="n">hours</span><span class="si">}</span><span class="s2">h </span><span class="si">{</span><span class="n">minutes</span><span class="si">}</span><span class="s2">m </span><span class="si">{</span><span class="nb">round</span><span class="p">(</span><span class="n">secs</span><span class="p">,</span><span class="w"> </span><span class="mi">0</span><span class="p">)</span><span class="si">}</span><span class="s2">s"</span></div>
+
+
+
+<div class="viewcode-block" id="parse_args">
+<a class="viewcode-back" href="../../modules/scraping.scrape.html#scraping.scrape.parse_args">[docs]</a>
+<span class="k">def</span><span class="w"> </span><span class="nf">parse_args</span><span class="p">():</span>
+<span class="w">    </span><span class="sd">"""</span>
+<span class="sd">    Parse CLI arguments for scraping GradCafe admissions results</span>
+<span class="sd">    directly.</span>
+
+<span class="sd">    :returns: Parsed arguments.</span>
+<span class="sd">    :rtype: argparse.Namespace</span>
+<span class="sd">    """</span>
+    <span class="n">parser</span> <span class="o">=</span> <span class="n">argparse</span><span class="o">.</span><span class="n">ArgumentParser</span><span class="p">(</span>
+        <span class="n">description</span><span class="o">=</span><span class="s2">"Scrape GradCafe admissions results into a JSON file."</span>
+    <span class="p">)</span>
+    <span class="n">parser</span><span class="o">.</span><span class="n">add_argument</span><span class="p">(</span>
+        <span class="s2">"--num_results"</span><span class="p">,</span> <span class="nb">type</span><span class="o">=</span><span class="nb">int</span><span class="p">,</span> <span class="n">default</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span>
+        <span class="n">help</span><span class="o">=</span><span class="s2">"Number of results to collect. If omitted, scrapes from page "</span>
+        <span class="sa">f</span><span class="s2">"1 until </span><span class="si">{</span><span class="n">PULL_SEEN_LIMIT</span><span class="si">}</span><span class="s2"> consecutive already-seen results are "</span>
+        <span class="s2">"found, or until stopped."</span>
+    <span class="p">)</span>
+    <span class="n">parser</span><span class="o">.</span><span class="n">add_argument</span><span class="p">(</span>
+        <span class="s2">"--pull_seen_limit"</span><span class="p">,</span> <span class="nb">type</span><span class="o">=</span><span class="nb">int</span><span class="p">,</span> <span class="n">default</span><span class="o">=</span><span class="n">PULL_SEEN_LIMIT</span><span class="p">,</span>
+        <span class="n">help</span><span class="o">=</span><span class="sa">f</span><span class="s2">"Consecutive already-seen results that end a --num_results-less "</span>
+        <span class="sa">f</span><span class="s2">"run (default: </span><span class="si">{</span><span class="n">PULL_SEEN_LIMIT</span><span class="si">}</span><span class="s2">). Ignored with --num_results."</span>
+    <span class="p">)</span>
+    <span class="n">parser</span><span class="o">.</span><span class="n">add_argument</span><span class="p">(</span>
+        <span class="s2">"--chrome_binary"</span><span class="p">,</span> <span class="nb">type</span><span class="o">=</span><span class="n">Path</span><span class="p">,</span> <span class="n">required</span><span class="o">=</span><span class="kc">True</span><span class="p">,</span>
+        <span class="n">help</span><span class="o">=</span><span class="s2">"Absolute path to the system Chrome binary."</span>
+    <span class="p">)</span>
+    <span class="n">parser</span><span class="o">.</span><span class="n">add_argument</span><span class="p">(</span>
+        <span class="s2">"relative_filepath"</span><span class="p">,</span> <span class="nb">type</span><span class="o">=</span><span class="n">Path</span><span class="p">,</span> <span class="n">nargs</span><span class="o">=</span><span class="s2">"?"</span><span class="p">,</span> <span class="n">default</span><span class="o">=</span><span class="n">DEFAULT_DATA_FILE</span><span class="p">,</span>
+        <span class="n">help</span><span class="o">=</span><span class="sa">f</span><span class="s2">"File to save results to (default: `</span><span class="si">{</span><span class="n">DEFAULT_DATA_FILE</span><span class="si">}</span><span class="s2">`)"</span>
+    <span class="p">)</span>
+    <span class="k">return</span> <span class="n">parser</span><span class="o">.</span><span class="n">parse_args</span><span class="p">()</span></div>
+
+
+
+<div class="viewcode-block" id="run_scrape">
+<a class="viewcode-back" href="../../modules/scraping.scrape.html#scraping.scrape.run_scrape">[docs]</a>
+<span class="k">def</span><span class="w"> </span><span class="nf">run_scrape</span><span class="p">(</span><span class="n">args</span><span class="p">):</span>
+<span class="w">    </span><span class="sd">"""</span>
+<span class="sd">    Scrape GradCafe admissions results into a JSON file.</span>
+
+<span class="sd">    With --num_results, resumes from saved pagination state and stops at</span>
+<span class="sd">    that many total results (or when there are no more pages).</span>
+
+<span class="sd">    Without --num_results ("pull mode"), always starts at page 1 and</span>
+<span class="sd">    ignores saved pagination state, since the goal is to catch newly</span>
+<span class="sd">    submitted entries rather than continue an earlier crawl. It stops</span>
+<span class="sd">    once --pull_seen_limit consecutive results already exist in the</span>
+<span class="sd">    output file (a sign this run has caught up to previously scraped</span>
+<span class="sd">    data), when there are no more pages, or when this process receives</span>
+<span class="sd">    SIGTERM (as sent by Flask's Cancel button), whichever comes first.</span>
+<span class="sd">    Whatever was already saved before stopping stays saved either way.</span>
+
+<span class="sd">    :param args: Parsed CLI arguments, as returned by parse_args().</span>
+<span class="sd">    :type args: argparse.Namespace</span>
+<span class="sd">    :returns: None.</span>
+<span class="sd">    :rtype: None</span>
+<span class="sd">    """</span>
+    <span class="n">signal</span><span class="o">.</span><span class="n">signal</span><span class="p">(</span><span class="n">signal</span><span class="o">.</span><span class="n">SIGTERM</span><span class="p">,</span> <span class="n">_handle_sigterm</span><span class="p">)</span>
+
+    <span class="n">validate_filepath</span><span class="p">(</span><span class="n">args</span><span class="o">.</span><span class="n">relative_filepath</span><span class="p">,</span> <span class="n">must_exist</span><span class="o">=</span><span class="kc">False</span><span class="p">)</span>
+
+    <span class="k">if</span> <span class="ow">not</span> <span class="n">args</span><span class="o">.</span><span class="n">chrome_binary</span><span class="o">.</span><span class="n">is_file</span><span class="p">():</span>
+        <span class="k">raise</span> <span class="ne">FileNotFoundError</span><span class="p">(</span><span class="sa">f</span><span class="s2">"'</span><span class="si">{</span><span class="n">args</span><span class="o">.</span><span class="n">chrome_binary</span><span class="si">}</span><span class="s2">' is not a valid Chrome binary path."</span><span class="p">)</span>
+
+    <span class="n">admissions_url</span> <span class="o">=</span> <span class="s2">"https://www.thegradcafe.com/survey"</span>
+    <span class="k">if</span> <span class="ow">not</span> <span class="n">check_robots_allowed</span><span class="p">(</span><span class="n">admissions_url</span><span class="p">):</span>
+        <span class="k">raise</span> <span class="ne">PermissionError</span><span class="p">(</span><span class="sa">f</span><span class="s2">"Scraping </span><span class="si">{</span><span class="n">admissions_url</span><span class="si">}</span><span class="s2"> is disallowed by robots.txt"</span><span class="p">)</span>
+
+    <span class="n">pull_mode</span> <span class="o">=</span> <span class="n">args</span><span class="o">.</span><span class="n">num_results</span> <span class="ow">is</span> <span class="kc">None</span>
+
+    <span class="c1"># urls already on disk are the source of truth for how many unique</span>
+    <span class="c1"># results exist and which ones to skip - this makes growing an</span>
+    <span class="c1"># already-complete file safe even if the pagination state below is</span>
+    <span class="c1"># stale, missing, or points back at page 1</span>
+    <span class="n">seen_urls</span> <span class="o">=</span> <span class="n">load_existing_urls</span><span class="p">(</span><span class="n">args</span><span class="o">.</span><span class="n">relative_filepath</span><span class="p">)</span>
+    <span class="n">result_count</span> <span class="o">=</span> <span class="nb">len</span><span class="p">(</span><span class="n">seen_urls</span><span class="p">)</span>
+
+    <span class="n">state_path</span> <span class="o">=</span> <span class="n">state_path_for</span><span class="p">(</span><span class="n">args</span><span class="o">.</span><span class="n">relative_filepath</span><span class="p">)</span>
+    <span class="k">if</span> <span class="n">pull_mode</span><span class="p">:</span>
+        <span class="n">current_url</span> <span class="o">=</span> <span class="n">admissions_url</span>
+        <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">"Pulling new results from page 1 until </span><span class="si">{</span><span class="n">args</span><span class="o">.</span><span class="n">pull_seen_limit</span><span class="si">}</span><span class="s2"> "</span>
+              <span class="s2">"consecutive already-seen results are found."</span><span class="p">)</span>
+    <span class="k">else</span><span class="p">:</span>
+        <span class="n">state</span> <span class="o">=</span> <span class="n">load_state</span><span class="p">(</span><span class="n">state_path</span><span class="p">)</span>
+        <span class="k">if</span> <span class="n">state</span><span class="p">:</span>
+            <span class="n">current_url</span> <span class="o">=</span> <span class="n">state</span><span class="p">[</span><span class="s2">"next_url"</span><span class="p">]</span>
+            <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">"Resuming pagination from saved state (</span><span class="si">{</span><span class="n">result_count</span><span class="si">}</span><span class="s2"> unique results already in file)."</span><span class="p">)</span>
+        <span class="k">else</span><span class="p">:</span>
+            <span class="n">current_url</span> <span class="o">=</span> <span class="n">admissions_url</span>
+
+        <span class="k">if</span> <span class="n">result_count</span> <span class="o">&gt;=</span> <span class="n">args</span><span class="o">.</span><span class="n">num_results</span><span class="p">:</span>
+            <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">"Already have </span><span class="si">{</span><span class="n">result_count</span><span class="si">}</span><span class="s2"> results (&gt;= requested </span><span class="si">{</span><span class="n">args</span><span class="o">.</span><span class="n">num_results</span><span class="si">}</span><span class="s2">); nothing to do."</span><span class="p">)</span>
+            <span class="k">return</span>
+
+    <span class="n">chrome_process</span> <span class="o">=</span> <span class="kc">None</span>
+    <span class="n">profile_dir</span> <span class="o">=</span> <span class="n">create_profile_dir</span><span class="p">()</span>
+    <span class="n">consecutive_seen</span> <span class="o">=</span> <span class="mi">0</span>
+    <span class="k">try</span><span class="p">:</span>
+        <span class="n">driver</span><span class="p">,</span> <span class="n">chrome_process</span> <span class="o">=</span> <span class="n">chrome_helper</span><span class="p">(</span>
+            <span class="n">admissions_url</span><span class="p">,</span> <span class="s2">"127.0.0.1:9222"</span><span class="p">,</span> <span class="n">args</span><span class="o">.</span><span class="n">chrome_binary</span><span class="p">,</span> <span class="n">profile_dir</span>
+        <span class="p">)</span>
+
+        <span class="n">pages_completed</span> <span class="o">=</span> <span class="mi">0</span>
+        <span class="n">total_start</span> <span class="o">=</span> <span class="n">time</span><span class="o">.</span><span class="n">time</span><span class="p">()</span>
+        <span class="c1"># first page (fresh or resumed) needs an explicit URL navigation;</span>
+        <span class="c1"># subsequent pages are reached by clicking "Next" inside scrape_data</span>
+        <span class="n">navigate_by_url</span> <span class="o">=</span> <span class="kc">True</span>
+
+        <span class="k">while</span> <span class="n">pull_mode</span> <span class="ow">or</span> <span class="n">result_count</span> <span class="o">&lt;</span> <span class="n">args</span><span class="o">.</span><span class="n">num_results</span><span class="p">:</span>
+            <span class="n">admissions_results</span><span class="p">,</span> <span class="n">next_page_url</span> <span class="o">=</span> <span class="n">scrape_data</span><span class="p">(</span>
+                <span class="n">driver</span><span class="p">,</span> <span class="n">current_url</span> <span class="k">if</span> <span class="n">navigate_by_url</span> <span class="k">else</span> <span class="kc">None</span>
+            <span class="p">)</span>
+            <span class="n">navigate_by_url</span> <span class="o">=</span> <span class="kc">False</span>
+            <span class="n">parsed_results</span> <span class="o">=</span> <span class="n">clean_data</span><span class="p">(</span><span class="n">admissions_results</span><span class="p">,</span> <span class="n">current_url</span><span class="p">)</span>
+            <span class="n">pages_completed</span> <span class="o">+=</span> <span class="mi">1</span>
+
+            <span class="n">new_results</span> <span class="o">=</span> <span class="p">[]</span>
+            <span class="k">for</span> <span class="n">result</span> <span class="ow">in</span> <span class="n">parsed_results</span><span class="p">:</span>
+                <span class="n">url</span> <span class="o">=</span> <span class="n">result</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s2">"url"</span><span class="p">)</span>
+                <span class="k">if</span> <span class="n">url</span> <span class="ow">in</span> <span class="n">seen_urls</span><span class="p">:</span>
+                    <span class="n">consecutive_seen</span> <span class="o">+=</span> <span class="mi">1</span>
+                <span class="k">else</span><span class="p">:</span>
+                    <span class="n">consecutive_seen</span> <span class="o">=</span> <span class="mi">0</span>
+                    <span class="n">new_results</span><span class="o">.</span><span class="n">append</span><span class="p">(</span><span class="n">result</span><span class="p">)</span>
+            <span class="n">seen_urls</span><span class="o">.</span><span class="n">update</span><span class="p">(</span><span class="n">r</span><span class="p">[</span><span class="s2">"url"</span><span class="p">]</span> <span class="k">for</span> <span class="n">r</span> <span class="ow">in</span> <span class="n">new_results</span> <span class="k">if</span> <span class="n">r</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s2">"url"</span><span class="p">))</span>
+            <span class="n">result_count</span> <span class="o">+=</span> <span class="nb">len</span><span class="p">(</span><span class="n">new_results</span><span class="p">)</span>
+
+            <span class="k">if</span> <span class="n">new_results</span><span class="p">:</span>
+                <span class="n">save_data</span><span class="p">(</span><span class="n">new_results</span><span class="p">,</span> <span class="n">args</span><span class="o">.</span><span class="n">relative_filepath</span><span class="p">)</span>
+
+            <span class="c1"># printed unconditionally for every page whether data was written</span>
+            <span class="c1"># or not, so read pages are always visible even when they add nothing new</span>
+            <span class="nb">print</span><span class="p">(</span>
+                <span class="sa">f</span><span class="s2">"Page </span><span class="si">{</span><span class="n">pages_completed</span><span class="si">}</span><span class="s2">: read </span><span class="si">{</span><span class="nb">len</span><span class="p">(</span><span class="n">parsed_results</span><span class="p">)</span><span class="si">}</span><span class="s2">, "</span>
+                <span class="sa">f</span><span class="s2">"</span><span class="si">{</span><span class="nb">len</span><span class="p">(</span><span class="n">new_results</span><span class="p">)</span><span class="si">}</span><span class="s2"> new (</span><span class="si">{</span><span class="n">result_count</span><span class="si">}</span><span class="s2"> total unique so far)"</span>
+            <span class="p">)</span>
+
+            <span class="k">if</span> <span class="n">pull_mode</span> <span class="ow">and</span> <span class="n">consecutive_seen</span> <span class="o">&gt;=</span> <span class="n">args</span><span class="o">.</span><span class="n">pull_seen_limit</span><span class="p">:</span>
+                <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">"Reached </span><span class="si">{</span><span class="n">consecutive_seen</span><span class="si">}</span><span class="s2"> consecutive already-seen results; stopping."</span><span class="p">)</span>
+                <span class="k">break</span>
+
+            <span class="k">if</span> <span class="n">next_page_url</span> <span class="ow">is</span> <span class="kc">None</span><span class="p">:</span>
+                <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">"No additional pages available. Stopping at </span><span class="si">{</span><span class="n">result_count</span><span class="si">}</span><span class="s2"> results."</span><span class="p">)</span>
+                <span class="k">if</span> <span class="ow">not</span> <span class="n">pull_mode</span><span class="p">:</span>
+                    <span class="n">state_path</span><span class="o">.</span><span class="n">unlink</span><span class="p">(</span><span class="n">missing_ok</span><span class="o">=</span><span class="kc">True</span><span class="p">)</span>
+                <span class="k">break</span>
+
+            <span class="k">if</span> <span class="n">pull_mode</span><span class="p">:</span>
+                <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">"Running total: </span><span class="si">{</span><span class="n">result_count</span><span class="si">}</span><span class="s2">, </span><span class="si">{</span><span class="n">consecutive_seen</span><span class="si">}</span><span class="s2"> consecutive already-seen"</span><span class="p">)</span>
+            <span class="k">else</span><span class="p">:</span>
+                <span class="c1"># save pagination state even after reaching quota so later</span>
+                <span class="c1"># runs asking for more results resume near here instead of</span>
+                <span class="c1"># restarting the crawl from page 1</span>
+                <span class="n">save_state</span><span class="p">({</span><span class="s2">"next_url"</span><span class="p">:</span> <span class="n">next_page_url</span><span class="p">},</span> <span class="n">state_path</span><span class="p">)</span>
+
+                <span class="k">if</span> <span class="n">result_count</span> <span class="o">&gt;=</span> <span class="n">args</span><span class="o">.</span><span class="n">num_results</span><span class="p">:</span>
+                    <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">"Scraping finished with </span><span class="si">{</span><span class="n">result_count</span><span class="si">}</span><span class="s2"> results."</span><span class="p">)</span>
+                    <span class="k">break</span>
+
+                <span class="n">avg_loop_time</span> <span class="o">=</span> <span class="p">(</span><span class="n">time</span><span class="o">.</span><span class="n">time</span><span class="p">()</span> <span class="o">-</span> <span class="n">total_start</span><span class="p">)</span> <span class="o">/</span> <span class="n">pages_completed</span>
+                <span class="n">remaining_results</span> <span class="o">=</span> <span class="n">args</span><span class="o">.</span><span class="n">num_results</span> <span class="o">-</span> <span class="n">result_count</span>
+                <span class="n">remaining_pages</span> <span class="o">=</span> <span class="o">-</span><span class="p">(</span><span class="o">-</span><span class="n">remaining_results</span> <span class="o">//</span> <span class="mi">20</span><span class="p">)</span>  <span class="c1"># ceiling division</span>
+                <span class="n">eta_seconds</span> <span class="o">=</span> <span class="n">remaining_pages</span> <span class="o">*</span> <span class="n">avg_loop_time</span>
+                <span class="nb">print</span><span class="p">(</span>
+                    <span class="sa">f</span><span class="s2">"Running total: </span><span class="si">{</span><span class="n">result_count</span><span class="si">}</span><span class="s2"> (ETA: </span><span class="si">{</span><span class="n">format_duration</span><span class="p">(</span><span class="n">eta_seconds</span><span class="p">)</span><span class="si">}</span><span class="s2">)"</span>
+                <span class="p">)</span>
+
+            <span class="n">current_url</span> <span class="o">=</span> <span class="n">next_page_url</span>
+
+            <span class="c1"># periodic restart to clear accumulated browser session state</span>
+            <span class="k">if</span> <span class="n">pages_completed</span> <span class="o">%</span> <span class="n">RESTART_EVERY_N_PAGES</span> <span class="o">==</span> <span class="mi">0</span><span class="p">:</span>
+                <span class="nb">print</span><span class="p">(</span><span class="s2">"Restarting Chrome to clear accumulated session state..."</span><span class="p">)</span>
+                <span class="n">terminate_process</span><span class="p">(</span><span class="n">chrome_process</span><span class="p">)</span>
+                <span class="n">driver</span><span class="p">,</span> <span class="n">chrome_process</span> <span class="o">=</span> <span class="n">chrome_helper</span><span class="p">(</span>
+                    <span class="n">admissions_url</span><span class="p">,</span> <span class="s2">"127.0.0.1:9222"</span><span class="p">,</span> <span class="n">args</span><span class="o">.</span><span class="n">chrome_binary</span><span class="p">,</span> <span class="n">profile_dir</span>
+                <span class="p">)</span>
+                <span class="n">navigate_by_url</span> <span class="o">=</span> <span class="kc">True</span>
+
+        <span class="n">total_elapsed</span> <span class="o">=</span> <span class="nb">round</span><span class="p">(</span><span class="n">time</span><span class="o">.</span><span class="n">time</span><span class="p">()</span> <span class="o">-</span> <span class="n">total_start</span><span class="p">,</span> <span class="mi">0</span><span class="p">)</span>
+        <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">"Total scraping time: </span><span class="si">{</span><span class="n">format_duration</span><span class="p">(</span><span class="n">total_elapsed</span><span class="p">)</span><span class="si">}</span><span class="s2">"</span><span class="p">)</span>
+    <span class="k">except</span> <span class="n">StopRequested</span><span class="p">:</span>
+        <span class="nb">print</span><span class="p">(</span><span class="s2">"Stopping: cancellation requested. Results collected so far are already saved."</span><span class="p">)</span>
+    <span class="k">finally</span><span class="p">:</span>
+        <span class="k">if</span> <span class="n">chrome_process</span> <span class="ow">is</span> <span class="ow">not</span> <span class="kc">None</span><span class="p">:</span>
+            <span class="n">terminate_process</span><span class="p">(</span><span class="n">chrome_process</span><span class="p">)</span>
+        <span class="n">cleanup_profile</span><span class="p">(</span><span class="n">profile_dir</span><span class="p">)</span></div>
+
+
+
+<span class="k">if</span> <span class="vm">__name__</span> <span class="o">==</span> <span class="s2">"__main__"</span><span class="p">:</span>
+    <span class="n">run_scrape</span><span class="p">(</span><span class="n">parse_args</span><span class="p">())</span>
+</pre></div>
+
+           </div>
+          </div>
+          <footer>
+
+  <hr/>
+
+  <div role="contentinfo">
+    <p>&#169; Copyright 2026, Cameron Ela.</p>
+  </div>
+
+  Built with <a href="https://www.sphinx-doc.org/">Sphinx</a> using a
+    <a href="https://github.com/readthedocs/sphinx_rtd_theme">theme</a>
+    provided by <a href="https://readthedocs.org">Read the Docs</a>.
+   
+
+</footer>
+        </div>
+      </div>
+    </section>
+  </div>
+  <script>
+      jQuery(function () {
+          SphinxRtdTheme.Navigation.enable(true);
+      });
+  </script> 
+
+</body>
+</html>

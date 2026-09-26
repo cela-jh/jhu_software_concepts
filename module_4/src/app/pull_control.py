@@ -26,11 +26,13 @@ _lines = deque(maxlen=RECENT_LINES)
 
 def kill_stale_chrome():
     """
-    Kills any process listening on Chrome's remote debugging port, left
+    Kill any process listening on Chrome's remote debugging port, left
     over from an earlier run that ended without its own cleanup running,
     so it can never block or collide with a new one. Called when the app
     starts and when it stops.
-    Returns none.
+
+    :returns: None.
+    :rtype: None
     """
     try:
         result = subprocess.run(
@@ -48,25 +50,39 @@ def kill_stale_chrome():
 
 def is_running():
     """
-    Returns whether a pull is active, covering both the scrape itself
+    Return whether a pull is active, covering both the scrape itself
     and the database upload that follows it.
+
+    :returns: True if a pull is currently running.
+    :rtype: bool
     """
     with _lock:
         return _thread is not None and _thread.is_alive()
 
 
 def recent_lines():
-    """Returns up to the last RECENT_LINES status lines, oldest first."""
+    """
+    Return up to the last RECENT_LINES status lines, oldest first.
+
+    :returns: The most recent status lines.
+    :rtype: list[str]
+    """
     with _lock:
         return list(_lines)
 
 
 def start(chrome_binary, database_url):
     """
-    Starts the pull subprocess if one isn't already running, then a
+    Start the pull subprocess if one isn't already running, then a
     background thread that streams its output into recent_lines() and
     uploads whatever it collected to PostgreSQL once it exits.
-    Returns True if a pull was started, False if one was already running.
+
+    :param chrome_binary: Path to the Chrome binary the scraper should launch.
+    :type chrome_binary: str
+    :param database_url: PostgreSQL connection string for the upload step.
+    :type database_url: str
+    :returns: True if a pull was started, False if one was already running.
+    :rtype: bool
     """
     global _process, _thread
     with _lock:
@@ -88,12 +104,14 @@ def start(chrome_binary, database_url):
 
 def cancel():
     """
-    Sends a termination signal to the running pull subprocess, if the
+    Send a termination signal to the running pull subprocess, if the
     scrape itself is still going; scrape.py catches this and stops
     cleanly, so whatever it already collected is still uploaded
     afterward. If the scrape has already finished and only the database
     upload is left, there is nothing left to cancel.
-    Returns "cancelling", "finishing", or "not_running".
+
+    :returns: ``"cancelling"``, ``"finishing"``, or ``"not_running"``.
+    :rtype: str
     """
     with _lock:
         if _thread is None or not _thread.is_alive():
@@ -106,12 +124,19 @@ def cancel():
 
 def _stream_and_upload(process, database_url):
     """
-    Reads the subprocess's output line by line into recent_lines() as it
-    runs, then loads whatever it collected into PostgreSQL once it exits,
+    Read the subprocess's output line by line into recent_lines() as it
+    runs, then load whatever it collected into PostgreSQL once it exits,
     also capturing that step's own printed summary into recent_lines().
     Whatever was collected is still uploaded even if the scraper exited
     with an error, but the final status line reflects that instead of
     unconditionally announcing success.
+
+    :param process: The running scrape.py subprocess.
+    :type process: subprocess.Popen
+    :param database_url: PostgreSQL connection string for the upload step.
+    :type database_url: str
+    :returns: None.
+    :rtype: None
     """
     for line in process.stdout:
         with _lock:

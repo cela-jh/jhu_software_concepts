@@ -8,3 +8,5 @@ llama-cpp-python==0.3.35
 pytest==8.3.4
 pytest-cov==6.0.0
 pytest-randomly==3.16.0
+Sphinx==9.1.0
+sphinx_rtd_theme==3.1.0

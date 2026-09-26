@@ -12,7 +12,10 @@ from paths import DEFAULT_DATA_FILE
 
 def parse_args():
     """
-    Parses CLI arguments for starting the Flask server.
+    Parse CLI arguments for starting the Flask server.
+
+    :returns: Parsed arguments with a `file` attribute.
+    :rtype: argparse.Namespace
     """
     parser = argparse.ArgumentParser(
         description="Start the GradCafeAnalytics analysis webpage."

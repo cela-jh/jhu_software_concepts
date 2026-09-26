@@ -1,0 +1,337 @@
+
+
+<!DOCTYPE html>
+<html class="writer-html5" lang="en" data-content_root="../">
+<head>
+  <meta charset="utf-8" /><meta name="viewport" content="width=device-width, initial-scale=1" />
+
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>scraping.scrape module &mdash; GradCafe Analytics 1.0 documentation</title>
+      <link rel="stylesheet" type="text/css" href="../_static/pygments.css?v=b86133f3" />
+      <link rel="stylesheet" type="text/css" href="../_static/css/theme.css?v=9edc463e" />
+
+  
+      <script src="../_static/jquery.js?v=5d32c60e"></script>
+      <script src="../_static/_sphinx_javascript_frameworks_compat.js?v=2cd50e6c"></script>
+      <script src="../_static/documentation_options.js?v=f2a433a1"></script>
+      <script src="../_static/doctools.js?v=fd6eb6e6"></script>
+      <script src="../_static/sphinx_highlight.js?v=6ffebe34"></script>
+    <script src="../_static/js/theme.js"></script>
+    <link rel="index" title="Index" href="../genindex.html" />
+    <link rel="search" title="Search" href="../search.html" />
+    <link rel="next" title="scraping.storage module" href="scraping.storage.html" />
+    <link rel="prev" title="scraping.clean module" href="scraping.clean.html" /> 
+</head>
+
+<body class="wy-body-for-nav"> 
+  <div class="wy-grid-for-nav">
+    <nav data-toggle="wy-nav-shift" class="wy-nav-side">
+      <div class="wy-side-scroll">
+        <div class="wy-side-nav-search" >
+
+          
+          
+          <a href="../index.html" class="icon icon-home">
+            GradCafe Analytics
+          </a>
+<div role="search">
+  <form id="rtd-search-form" class="wy-form" action="../search.html" method="get">
+    <input type="text" name="q" placeholder="Search docs" aria-label="Search docs" />
+    <input type="hidden" name="check_keywords" value="yes" />
+    <input type="hidden" name="area" value="default" />
+  </form>
+</div>
+        </div><div class="wy-menu wy-menu-vertical" data-spy="affix" role="navigation" aria-label="Navigation menu">
+              <p class="caption" role="heading"><span class="caption-text">Contents:</span></p>
+<ul class="current">
+<li class="toctree-l1"><a class="reference internal" href="../overview_setup.html">Overview &amp; Setup</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../architecture.html">Architecture</a></li>
+<li class="toctree-l1 current"><a class="reference internal" href="modules.html">API Reference</a><ul class="current">
+<li class="toctree-l2"><a class="reference internal" href="app.html">app package</a></li>
+<li class="toctree-l2"><a class="reference internal" href="database.html">database package</a></li>
+<li class="toctree-l2"><a class="reference internal" href="llm_hosting.html">llm_hosting package</a></li>
+<li class="toctree-l2"><a class="reference internal" href="paths.html">paths module</a></li>
+<li class="toctree-l2"><a class="reference internal" href="run.html">run module</a></li>
+<li class="toctree-l2 current"><a class="reference internal" href="scraping.html">scraping package</a><ul class="current">
+<li class="toctree-l3 current"><a class="reference internal" href="scraping.html#submodules">Submodules</a><ul class="current">
+<li class="toctree-l4"><a class="reference internal" href="scraping.clean.html">scraping.clean module</a></li>
+<li class="toctree-l4 current"><a class="current reference internal" href="#">scraping.scrape module</a></li>
+<li class="toctree-l4"><a class="reference internal" href="scraping.storage.html">scraping.storage module</a></li>
+</ul>
+</li>
+<li class="toctree-l3"><a class="reference internal" href="scraping.html#module-scraping">Module contents</a></li>
+</ul>
+</li>
+</ul>
+</li>
+<li class="toctree-l1"><a class="reference internal" href="../testing_guide.html">Testing Guide</a></li>
+</ul>
+
+        </div>
+      </div>
+    </nav>
+
+    <section data-toggle="wy-nav-shift" class="wy-nav-content-wrap"><nav class="wy-nav-top" aria-label="Mobile navigation menu" >
+          <i data-toggle="wy-nav-top" class="fa fa-bars"></i>
+          <a href="../index.html">GradCafe Analytics</a>
+      </nav>
+
+      <div class="wy-nav-content">
+        <div class="rst-content">
+          <div role="navigation" aria-label="Page navigation">
+  <ul class="wy-breadcrumbs">
+      <li><a href="../index.html" class="icon icon-home" aria-label="Home"></a></li>
+          <li class="breadcrumb-item"><a href="modules.html">API Reference</a></li>
+          <li class="breadcrumb-item"><a href="scraping.html">scraping package</a></li>
+      <li class="breadcrumb-item active">scraping.scrape module</li>
+      <li class="wy-breadcrumbs-aside">
+            <a href="../_sources/modules/scraping.scrape.rst.txt" rel="nofollow"> View page source</a>
+      </li>
+  </ul>
+  <hr/>
+</div>
+          <div role="main" class="document" itemscope="itemscope" itemtype="http://schema.org/Article">
+           <div itemprop="articleBody">
+             
+  <section id="module-scraping.scrape">
+<span id="scraping-scrape-module"></span><h1>scraping.scrape module<a class="headerlink" href="#module-scraping.scrape" title="Link to this heading"></a></h1>
+<p><cite>scrape.py</cite>
+Scrapes admissions results from GradCafe into a JSON file. Run directly
+(<cite>python scrape.py [options] [output.json]</cite>) to scrape; <cite>scrape_data</cite> and
+the other functions here can also be imported on their own.</p>
+<dl class="py exception">
+<dt class="sig sig-object py" id="scraping.scrape.StopRequested">
+<span class="property"><span class="k"><span class="pre">exception</span></span><span class="w"> </span></span><span class="sig-prename descclassname"><span class="pre">scraping.scrape.</span></span><span class="sig-name descname"><span class="pre">StopRequested</span></span><a class="reference internal" href="../_modules/scraping/scrape.html#StopRequested"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#scraping.scrape.StopRequested" title="Link to this definition"></a></dt>
+<dd><p>Bases: <code class="xref py py-class docutils literal notranslate"><span class="pre">BaseException</span></code></p>
+<p>Raised when a SIGTERM asks a running scrape to stop cleanly. A
+BaseException rather than an Exception, like KeyboardInterrupt, so it
+isn’t swallowed by the broad except-Exception retry loops throughout
+this file.</p>
+</dd></dl>
+
+<dl class="py function">
+<dt class="sig sig-object py" id="scraping.scrape.check_robots_allowed">
+<span class="sig-prename descclassname"><span class="pre">scraping.scrape.</span></span><span class="sig-name descname"><span class="pre">check_robots_allowed</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">url</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">user_agent</span></span><span class="o"><span class="pre">=</span></span><span class="default_value"><span class="pre">'*'</span></span></em><span class="sig-paren">)</span><a class="reference internal" href="../_modules/scraping/scrape.html#check_robots_allowed"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#scraping.scrape.check_robots_allowed" title="Link to this definition"></a></dt>
+<dd><p>Check the site’s robots.txt to see if scraping is permitted on the
+domain. Fetches it with a browser-like User-Agent, since Cloudflare
+returns a 403 for RobotFileParser’s default “Python-urllib/x.y” UA -
+which robotparser’s read() treats as “disallow everything” rather
+than as a fetch failure.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Parameters<span class="colon">:</span></dt>
+<dd class="field-odd"><ul class="simple">
+<li><p><strong>url</strong> (<em>str</em>) – The URL to check permission for.</p></li>
+<li><p><strong>user_agent</strong> (<em>str</em>) – The user agent to check permission for.</p></li>
+</ul>
+</dd>
+<dt class="field-even">Returns<span class="colon">:</span></dt>
+<dd class="field-even"><p>True if allowed, else False.</p>
+</dd>
+<dt class="field-odd">Return type<span class="colon">:</span></dt>
+<dd class="field-odd"><p>bool</p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py function">
+<dt class="sig sig-object py" id="scraping.scrape.chrome_helper">
+<span class="sig-prename descclassname"><span class="pre">scraping.scrape.</span></span><span class="sig-name descname"><span class="pre">chrome_helper</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">url</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">host_port</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">chrome_bin</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">profile_dir</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">retries</span></span><span class="o"><span class="pre">=</span></span><span class="default_value"><span class="pre">5</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">base_retry_delay</span></span><span class="o"><span class="pre">=</span></span><span class="default_value"><span class="pre">15</span></span></em><span class="sig-paren">)</span><a class="reference internal" href="../_modules/scraping/scrape.html#chrome_helper"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#scraping.scrape.chrome_helper" title="Link to this definition"></a></dt>
+<dd><p>Work around Cloudflare verification at url (GradCafe), using a
+persistent Chrome profile so a cleared session survives restarts.
+Retries the initial navigation on transient errors, then only waits
+for manual completion if a Cloudflare challenge is actually shown.
+Cleans up its own spawned process if initialization fails partway
+through.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Parameters<span class="colon">:</span></dt>
+<dd class="field-odd"><ul class="simple">
+<li><p><strong>url</strong> (<em>str</em>) – The URL to navigate to.</p></li>
+<li><p><strong>host_port</strong> (<em>str</em>) – The debugging endpoint’s host:port address.</p></li>
+<li><p><strong>chrome_bin</strong> (<em>str</em><em> or </em><em>pathlib.Path</em>) – Path to the Chrome binary to launch.</p></li>
+<li><p><strong>profile_dir</strong> (<em>str</em>) – Path to the Chrome profile directory to use.</p></li>
+<li><p><strong>retries</strong> (<em>int</em>) – How many times to retry the initial navigation.</p></li>
+<li><p><strong>base_retry_delay</strong> (<em>int</em>) – Base delay in seconds between retries,
+doubled on each subsequent attempt.</p></li>
+</ul>
+</dd>
+<dt class="field-even">Returns<span class="colon">:</span></dt>
+<dd class="field-even"><p>The resulting driver and Chrome process.</p>
+</dd>
+<dt class="field-odd">Return type<span class="colon">:</span></dt>
+<dd class="field-odd"><p>tuple(selenium.webdriver.Chrome, subprocess.Popen)</p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py function">
+<dt class="sig sig-object py" id="scraping.scrape.cleanup_profile">
+<span class="sig-prename descclassname"><span class="pre">scraping.scrape.</span></span><span class="sig-name descname"><span class="pre">cleanup_profile</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">profile_dir</span></span></em><span class="sig-paren">)</span><a class="reference internal" href="../_modules/scraping/scrape.html#cleanup_profile"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#scraping.scrape.cleanup_profile" title="Link to this definition"></a></dt>
+<dd><p>Remove the given Chrome profile directory. Call only once the
+profile is done being reused (i.e. scraping has fully finished).</p>
+<dl class="field-list simple">
+<dt class="field-odd">Parameters<span class="colon">:</span></dt>
+<dd class="field-odd"><p><strong>profile_dir</strong> (<em>str</em>) – Path to the Chrome profile directory to remove.</p>
+</dd>
+<dt class="field-even">Returns<span class="colon">:</span></dt>
+<dd class="field-even"><p>None.</p>
+</dd>
+<dt class="field-odd">Return type<span class="colon">:</span></dt>
+<dd class="field-odd"><p>None</p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py function">
+<dt class="sig sig-object py" id="scraping.scrape.create_profile_dir">
+<span class="sig-prename descclassname"><span class="pre">scraping.scrape.</span></span><span class="sig-name descname"><span class="pre">create_profile_dir</span></span><span class="sig-paren">(</span><span class="sig-paren">)</span><a class="reference internal" href="../_modules/scraping/scrape.html#create_profile_dir"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#scraping.scrape.create_profile_dir" title="Link to this definition"></a></dt>
+<dd><p>Create a new temporary Chrome profile directory.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Returns<span class="colon">:</span></dt>
+<dd class="field-odd"><p>The profile directory’s path.</p>
+</dd>
+<dt class="field-even">Return type<span class="colon">:</span></dt>
+<dd class="field-even"><p>str</p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py function">
+<dt class="sig sig-object py" id="scraping.scrape.format_duration">
+<span class="sig-prename descclassname"><span class="pre">scraping.scrape.</span></span><span class="sig-name descname"><span class="pre">format_duration</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">seconds</span></span></em><span class="sig-paren">)</span><a class="reference internal" href="../_modules/scraping/scrape.html#format_duration"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#scraping.scrape.format_duration" title="Link to this definition"></a></dt>
+<dd><p>Convert seconds to hours, minutes, seconds for loop/script
+execution.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Parameters<span class="colon">:</span></dt>
+<dd class="field-odd"><p><strong>seconds</strong> (<em>float</em>) – The duration to format.</p>
+</dd>
+<dt class="field-even">Returns<span class="colon">:</span></dt>
+<dd class="field-even"><p>The formatted duration.</p>
+</dd>
+<dt class="field-odd">Return type<span class="colon">:</span></dt>
+<dd class="field-odd"><p>str</p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py function">
+<dt class="sig sig-object py" id="scraping.scrape.parse_args">
+<span class="sig-prename descclassname"><span class="pre">scraping.scrape.</span></span><span class="sig-name descname"><span class="pre">parse_args</span></span><span class="sig-paren">(</span><span class="sig-paren">)</span><a class="reference internal" href="../_modules/scraping/scrape.html#parse_args"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#scraping.scrape.parse_args" title="Link to this definition"></a></dt>
+<dd><p>Parse CLI arguments for scraping GradCafe admissions results
+directly.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Returns<span class="colon">:</span></dt>
+<dd class="field-odd"><p>Parsed arguments.</p>
+</dd>
+<dt class="field-even">Return type<span class="colon">:</span></dt>
+<dd class="field-even"><p>argparse.Namespace</p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py function">
+<dt class="sig sig-object py" id="scraping.scrape.run_scrape">
+<span class="sig-prename descclassname"><span class="pre">scraping.scrape.</span></span><span class="sig-name descname"><span class="pre">run_scrape</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">args</span></span></em><span class="sig-paren">)</span><a class="reference internal" href="../_modules/scraping/scrape.html#run_scrape"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#scraping.scrape.run_scrape" title="Link to this definition"></a></dt>
+<dd><p>Scrape GradCafe admissions results into a JSON file.</p>
+<p>With –num_results, resumes from saved pagination state and stops at
+that many total results (or when there are no more pages).</p>
+<p>Without –num_results (“pull mode”), always starts at page 1 and
+ignores saved pagination state, since the goal is to catch newly
+submitted entries rather than continue an earlier crawl. It stops
+once –pull_seen_limit consecutive results already exist in the
+output file (a sign this run has caught up to previously scraped
+data), when there are no more pages, or when this process receives
+SIGTERM (as sent by Flask’s Cancel button), whichever comes first.
+Whatever was already saved before stopping stays saved either way.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Parameters<span class="colon">:</span></dt>
+<dd class="field-odd"><p><strong>args</strong> (<em>argparse.Namespace</em>) – Parsed CLI arguments, as returned by parse_args().</p>
+</dd>
+<dt class="field-even">Returns<span class="colon">:</span></dt>
+<dd class="field-even"><p>None.</p>
+</dd>
+<dt class="field-odd">Return type<span class="colon">:</span></dt>
+<dd class="field-odd"><p>None</p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py function">
+<dt class="sig sig-object py" id="scraping.scrape.scrape_data">
+<span class="sig-prename descclassname"><span class="pre">scraping.scrape.</span></span><span class="sig-name descname"><span class="pre">scrape_data</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">driver</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">url</span></span><span class="o"><span class="pre">=</span></span><span class="default_value"><span class="pre">None</span></span></em><span class="sig-paren">)</span><a class="reference internal" href="../_modules/scraping/scrape.html#scrape_data"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#scraping.scrape.scrape_data" title="Link to this definition"></a></dt>
+<dd><p>Scrape admissions results from the page at <cite>url</cite>, or from whatever
+page is currently loaded if url is None. Clicks “Next” afterward so
+the following page’s request carries a natural Referer.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Parameters<span class="colon">:</span></dt>
+<dd class="field-odd"><ul class="simple">
+<li><p><strong>driver</strong> (<em>selenium.webdriver.Chrome</em>) – The active Selenium Chrome driver.</p></li>
+<li><p><strong>url</strong> (<em>str</em><em> or </em><em>None</em>) – The URL to navigate to, or None to use the current page.</p></li>
+</ul>
+</dd>
+<dt class="field-even">Returns<span class="colon">:</span></dt>
+<dd class="field-even"><p>A list of Tag objects, each being a row with application
+details, and the next page’s URL (for resumable state), or None
+if no next page exists.</p>
+</dd>
+<dt class="field-odd">Return type<span class="colon">:</span></dt>
+<dd class="field-odd"><p>tuple(list[bs4.Tag], str or None)</p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py function">
+<dt class="sig sig-object py" id="scraping.scrape.terminate_process">
+<span class="sig-prename descclassname"><span class="pre">scraping.scrape.</span></span><span class="sig-name descname"><span class="pre">terminate_process</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">process</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">timeout</span></span><span class="o"><span class="pre">=</span></span><span class="default_value"><span class="pre">10</span></span></em><span class="sig-paren">)</span><a class="reference internal" href="../_modules/scraping/scrape.html#terminate_process"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#scraping.scrape.terminate_process" title="Link to this definition"></a></dt>
+<dd><p>Terminate the given Chrome process, force-killing it if it doesn’t
+respond to termination within the timeout. Does not remove the
+profile directory, since it may be reused across restarts.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Parameters<span class="colon">:</span></dt>
+<dd class="field-odd"><ul class="simple">
+<li><p><strong>process</strong> (<em>subprocess.Popen</em>) – The Chrome process to terminate.</p></li>
+<li><p><strong>timeout</strong> (<em>int</em>) – Seconds to wait for a clean exit before killing it.</p></li>
+</ul>
+</dd>
+<dt class="field-even">Returns<span class="colon">:</span></dt>
+<dd class="field-even"><p>None.</p>
+</dd>
+<dt class="field-odd">Return type<span class="colon">:</span></dt>
+<dd class="field-odd"><p>None</p>
+</dd>
+</dl>
+</dd></dl>
+
+</section>
+
+
+           </div>
+          </div>
+          <footer><div class="rst-footer-buttons" role="navigation" aria-label="Footer">
+        <a href="scraping.clean.html" class="btn btn-neutral float-left" title="scraping.clean module" accesskey="p" rel="prev"><span class="fa fa-arrow-circle-left" aria-hidden="true"></span> Previous</a>
+        <a href="scraping.storage.html" class="btn btn-neutral float-right" title="scraping.storage module" accesskey="n" rel="next">Next <span class="fa fa-arrow-circle-right" aria-hidden="true"></span></a>
+    </div>
+
+  <hr/>
+
+  <div role="contentinfo">
+    <p>&#169; Copyright 2026, Cameron Ela.</p>
+  </div>
+
+  Built with <a href="https://www.sphinx-doc.org/">Sphinx</a> using a
+    <a href="https://github.com/readthedocs/sphinx_rtd_theme">theme</a>
+    provided by <a href="https://readthedocs.org">Read the Docs</a>.
+   
+
+</footer>
+        </div>
+      </div>
+    </section>
+  </div>
+  <script>
+      jQuery(function () {
+          SphinxRtdTheme.Navigation.enable(true);
+      });
+  </script> 
+
+</body>
+</html>

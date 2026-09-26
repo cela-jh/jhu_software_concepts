@@ -25,24 +25,43 @@ UNIVERSITIES = [
 
 
 def _round2(expr):
-    """Rounds a SQL expression to 2 decimal places via a numeric cast."""
+    """
+    Round a SQL expression to 2 decimal places via a numeric cast.
+
+    :param expr: The SQL expression to round.
+    :type expr: sqlalchemy.sql.expression.ColumnElement
+    :returns: The rounded expression.
+    :rtype: sqlalchemy.sql.expression.ColumnElement
+    """
     return func.round(cast(expr, Numeric), 2)
 
 
 def _or_na(value):
-    """Renders a possibly-missing value (e.g. an AVG() over zero
-    matching rows, which SQL returns as NULL) as "N/A" instead of the
-    literal text "None"."""
+    """
+    Render a possibly-missing value (e.g. an AVG() over zero matching
+    rows, which SQL returns as NULL) as "N/A" instead of the literal
+    text "None".
+
+    :param value: The value to render.
+    :type value: object or None
+    :returns: value, or "N/A" if value is None.
+    :rtype: object or str
+    """
     return value if value is not None else "N/A"
 
 
 def _format_percentage(value):
     """
-    Formats a percentage value with exactly two decimal places (e.g.
-    50 becomes "50.00%", not "50.0%" or "50%"), regardless of whether it
+    Format a percentage value with exactly two decimal places (e.g. 50
+    becomes "50.00%", not "50.0%" or "50%"), regardless of whether it
     arrived as a Decimal from SQL-side rounding or a plain Python float.
-    Returns "N/A" instead of raising if there were no matching rows to
-    compute a percentage from (SQL SUM()/AVG() over zero rows is NULL).
+
+    :param value: The percentage value, or None if there were no
+        matching rows to compute a percentage from (SQL SUM()/AVG()
+        over zero rows is NULL).
+    :type value: decimal.Decimal or float or None
+    :returns: The formatted percentage, or "N/A" if value is None.
+    :rtype: str
     """
     if value is None:
         return "N/A"
@@ -50,7 +69,14 @@ def _format_percentage(value):
 
 
 def orm_q1(session):
-    """How many entries are from applicants who applied for Fall 2026?"""
+    """
+    How many entries are from applicants who applied for Fall 2026?
+
+    :param session: Active SQLAlchemy session.
+    :type session: sqlalchemy.orm.Session
+    :returns: The formatted answer.
+    :rtype: str
+    """
     count = session.execute(
         select(func.count())
         .select_from(Applicant)
@@ -60,7 +86,15 @@ def orm_q1(session):
 
 
 def orm_q2(session):
-    """Percentage of entries with a usable nationality classification that are international."""
+    """
+    Percentage of entries with a usable nationality classification that
+    are international.
+
+    :param session: Active SQLAlchemy session.
+    :type session: sqlalchemy.orm.Session
+    :returns: The formatted answer.
+    :rtype: str
+    """
     usable = and_(
         Applicant.us_or_international.is_not(None),
         Applicant.us_or_international != "",
@@ -74,7 +108,15 @@ def orm_q2(session):
 
 
 def orm_q3(session):
-    """Average GPA, GRE Quantitative, GRE Verbal, and GRE Analytical Writing scores."""
+    """
+    Average GPA, GRE Quantitative, GRE Verbal, and GRE Analytical
+    Writing scores.
+
+    :param session: Active SQLAlchemy session.
+    :type session: sqlalchemy.orm.Session
+    :returns: The formatted answer.
+    :rtype: str
+    """
     avg_gpa = session.execute(
         select(_round2(func.avg(Applicant.gpa))).where(Applicant.gpa.is_not(None))
     ).scalar_one()
@@ -92,7 +134,14 @@ def orm_q3(session):
 
 
 def orm_q4(session):
-    """Average GPA of American applicants who applied for Fall 2026."""
+    """
+    Average GPA of American applicants who applied for Fall 2026.
+
+    :param session: Active SQLAlchemy session.
+    :type session: sqlalchemy.orm.Session
+    :returns: The formatted answer.
+    :rtype: str
+    """
     avg_gpa = session.execute(
         select(_round2(func.avg(Applicant.gpa)))
         .where(
@@ -107,7 +156,14 @@ def orm_q4(session):
 
 
 def orm_q5(session):
-    """Percentage of Fall 2025 entries that are acceptances."""
+    """
+    Percentage of Fall 2025 entries that are acceptances.
+
+    :param session: Active SQLAlchemy session.
+    :type session: sqlalchemy.orm.Session
+    :returns: The formatted answer.
+    :rtype: str
+    """
     accepted = case((Applicant.status.ilike("Accepted%"), 1), else_=0)
     pct = session.execute(
         # The denominator counts every Fall 2025 row via count(), not
@@ -120,7 +176,14 @@ def orm_q5(session):
 
 
 def orm_q6(session):
-    """Average GPA of accepted applicants who applied for Fall 2026."""
+    """
+    Average GPA of accepted applicants who applied for Fall 2026.
+
+    :param session: Active SQLAlchemy session.
+    :type session: sqlalchemy.orm.Session
+    :returns: The formatted answer.
+    :rtype: str
+    """
     avg_gpa = session.execute(
         select(_round2(func.avg(Applicant.gpa)))
         .where(
@@ -135,7 +198,14 @@ def orm_q6(session):
 
 
 def orm_q7(session):
-    """Count of Johns Hopkins University master's Computer Science entries."""
+    """
+    Count of Johns Hopkins University master's Computer Science entries.
+
+    :param session: Active SQLAlchemy session.
+    :type session: sqlalchemy.orm.Session
+    :returns: The formatted answer.
+    :rtype: str
+    """
     count = session.execute(
         select(func.count())
         .select_from(Applicant)
@@ -154,7 +224,15 @@ def orm_q7(session):
 
 
 def _q8_count(session):
-    """Fall 2026 PhD Computer Science acceptances at the listed universities, by raw program text."""
+    """
+    Fall 2026 PhD Computer Science acceptances at the listed
+    universities, by raw program text.
+
+    :param session: Active SQLAlchemy session.
+    :type session: sqlalchemy.orm.Session
+    :returns: The matching row count.
+    :rtype: int
+    """
     university_match = or_(*(Applicant.program.ilike(f"%, {u}") for u in UNIVERSITIES))
     return session.execute(
         select(func.count())
@@ -172,12 +250,28 @@ def _q8_count(session):
 
 
 def orm_q8(session):
-    """How many Fall 2026 entries are PhD Computer Science acceptances at the listed universities?"""
+    """
+    How many Fall 2026 entries are PhD Computer Science acceptances at
+    the listed universities?
+
+    :param session: Active SQLAlchemy session.
+    :type session: sqlalchemy.orm.Session
+    :returns: The formatted answer.
+    :rtype: str
+    """
     return f"PhD Computer Science at listed schools: {_q8_count(session)}"
 
 
 def orm_q9(session):
-    """Repeats Q8 using the LLM-generated program/university fields, and reports the difference."""
+    """
+    Repeat Q8 using the LLM-generated program/university fields, and
+    report the difference.
+
+    :param session: Active SQLAlchemy session.
+    :type session: sqlalchemy.orm.Session
+    :returns: The formatted answer.
+    :rtype: str
+    """
     original_count = _q8_count(session)
     university_match = or_(*(Applicant.llm_generated_university.ilike(u) for u in UNIVERSITIES))
     llm_count = session.execute(
@@ -200,7 +294,15 @@ def orm_q9(session):
 
 
 def orm_a1(session):
-    """What percentage of total acceptances come from each term found in the data?"""
+    """
+    What percentage of total acceptances come from each term found in
+    the data?
+
+    :param session: Active SQLAlchemy session.
+    :type session: sqlalchemy.orm.Session
+    :returns: The formatted answer.
+    :rtype: str
+    """
     accepted_filter = Applicant.status.ilike("Accepted%")
     total_accepted = session.execute(
         select(func.count()).select_from(Applicant).where(accepted_filter)
@@ -224,7 +326,15 @@ def orm_a1(session):
 
 
 def orm_a2(session):
-    """Average GPA for USC applicants who were accepted versus not, and the difference."""
+    """
+    Average GPA for USC applicants who were accepted versus not, and
+    the difference.
+
+    :param session: Active SQLAlchemy session.
+    :type session: sqlalchemy.orm.Session
+    :returns: The formatted answer.
+    :rtype: str
+    """
     usc_match = or_(
         Applicant.program.ilike("%, University of Southern California"),
         Applicant.program.ilike("%, USC"),
@@ -257,9 +367,14 @@ ALL_ORM_ANSWERS = [
 
 def run_orm_queries(database_url: str):
     """
-    Opens a SQLAlchemy session against the applicants table and prints the
-    answer to each question in ORM_QUESTIONS.
-    Returns none.
+    Open a SQLAlchemy session against the applicants table and print
+    the answer to each question in ORM_QUESTIONS.
+
+    :param database_url: A "postgresql://user:password@host:port/dbname"
+        connection string.
+    :type database_url: str
+    :returns: None.
+    :rtype: None
     """
     session = get_session(database_url)
     try:
@@ -271,9 +386,11 @@ def run_orm_queries(database_url: str):
 
 def _database_url():
     """
-    Reads the DATABASE_URL environment variable.
-    Returns the connection string.
-    Raises EnvironmentError if it isn't set.
+    Read the DATABASE_URL environment variable.
+
+    :raises EnvironmentError: If it isn't set.
+    :returns: The connection string.
+    :rtype: str
     """
     database_url = os.getenv("DATABASE_URL")
     if not database_url:

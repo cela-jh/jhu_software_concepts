@@ -22,20 +22,27 @@ bp = Blueprint("analysis", __name__)
 
 
 def _database_url():
-    """Returns the DATABASE_URL environment variable, or None if unset."""
+    """
+    Return the DATABASE_URL environment variable, or None if unset.
+
+    :returns: The connection string, or None if it isn't set.
+    :rtype: str or None
+    """
     return os.getenv("DATABASE_URL") or None
 
 
 @bp.route("/analysis")
 def analysis():
     """
-    Runs every Part 2 analysis question through the SQLAlchemy ORM and
-    renders the results page, along with the Pull Data status so a page
+    Run every Part 2 analysis question through the SQLAlchemy ORM and
+    render the results page, along with the Pull Data status so a page
     reload during a pull still shows the Cancel button and its log.
-    Returns the rendered HTML; a plain error message if DATABASE_URL
-    isn't set; or a plain, readable "database unavailable" message if
-    PostgreSQL can't actually be reached (e.g. it's down), rather than an
-    unhandled 500.
+
+    :returns: The rendered analysis page; a plain 500 error message if
+        DATABASE_URL isn't set; or a plain, readable 503 "database
+        unavailable" message if PostgreSQL can't actually be reached
+        (e.g. it's down), rather than an unhandled 500.
+    :rtype: str or tuple(str, int)
     """
     database_url = _database_url()
     if database_url is None:
@@ -69,12 +76,15 @@ def analysis():
 @bp.route("/pull-data", methods=["POST"])
 def pull_start():
     """
-    Starts a Grad Cafe pull in the background if one isn't already
+    Start a Grad Cafe pull in the background if one isn't already
     running.
-    Returns JSON: {ok, status, message}. ok/status are True/"started" on
-    success, or ok False with status "error" if CHROME_BINARY or
-    DATABASE_URL aren't set. Returns 409 with ok False, busy True, and
-    status "already_running" if a pull is already in progress.
+
+    :returns: JSON ``{ok, status, message}``. ``ok``/``status`` are
+        ``True``/``"started"`` on success, or ``ok`` ``False`` with
+        status ``"error"`` if CHROME_BINARY or DATABASE_URL aren't set.
+        409 with ``ok`` ``False``, ``busy`` ``True``, and status
+        ``"already_running"`` if a pull is already in progress.
+    :rtype: flask.Response or tuple(flask.Response, int)
     """
     chrome_binary = os.getenv("CHROME_BINARY")
     if not chrome_binary:
@@ -101,11 +111,13 @@ def pull_start():
 @bp.route("/pull/cancel", methods=["POST"])
 def pull_cancel():
     """
-    Cancels the running pull, if the scrape itself is still going.
+    Cancel the running pull, if the scrape itself is still going.
     Whatever it already collected is still uploaded to PostgreSQL
     afterward.
-    Returns JSON: {status, message}. status is "cancelling", "finishing",
-    or "not_running".
+
+    :returns: JSON ``{status, message}``, where ``status`` is
+        ``"cancelling"``, ``"finishing"``, or ``"not_running"``.
+    :rtype: flask.Response
     """
     result = pull_control.cancel()
     messages = {
@@ -119,9 +131,11 @@ def pull_cancel():
 @bp.route("/pull/status")
 def pull_status():
     """
-    Reports whether a pull is currently running and its most recent
+    Report whether a pull is currently running and its most recent
     status lines, for the page to poll while a pull is active.
-    Returns JSON: {running, lines}.
+
+    :returns: JSON ``{running, lines}``.
+    :rtype: flask.Response
     """
     return jsonify(running=pull_control.is_running(), lines=pull_control.recent_lines())
 
@@ -129,17 +143,20 @@ def pull_status():
 @bp.route("/update-analysis", methods=["POST"])
 def update_analysis():
     """
-    Loads whatever is currently in the results file into PostgreSQL (the
+    Load whatever is currently in the results file into PostgreSQL (the
     same upsert load_data() always does) so data added by hand, by the
     LLM standardizer, or by a finished pull is reflected without
     starting a new scrape. analysis() already runs fresh queries on
     every GET /analysis, so the client reloads afterward to see the
     results. Busy-gated like Pull Data since a running pull's own upload
     step already owns the same table.
-    Returns JSON: {ok, status, message}. 409 with ok False, busy True,
-    and status "busy" if a pull is running; 500 with ok False and status
-    "error" if DATABASE_URL isn't set; otherwise 200 with ok True, status
-    "ok", and load_data()'s own summary as the message.
+
+    :returns: JSON ``{ok, status, message}``. 409 with ``ok`` ``False``,
+        ``busy`` ``True``, and status ``"busy"`` if a pull is running;
+        500 with ``ok`` ``False`` and status ``"error"`` if
+        DATABASE_URL isn't set; otherwise 200 with ``ok`` ``True``,
+        status ``"ok"``, and load_data()'s own summary as the message.
+    :rtype: flask.Response or tuple(flask.Response, int)
     """
     if pull_control.is_running():
         return jsonify(ok=False, busy=True, status="busy", message=(

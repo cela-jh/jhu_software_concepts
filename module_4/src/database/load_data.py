@@ -59,12 +59,17 @@ class InvalidResult(Exception):
 
 def _extract_number(text, valid_ranges=None):
     """
-    Pulls the first number out of a badge string such as "GPA 3.40". If
-    valid_ranges is given (a list of (low, high) inclusive bounds), a
-    number outside every range is discarded as an implausible or
-    mis-scaled value rather than being stored as-is.
-    Returns a float, or None if text is missing, has no number, or the
-    number falls outside every given valid range.
+    Pull the first number out of a badge string such as "GPA 3.40".
+
+    :param text: The badge string to extract a number from.
+    :type text: str or None
+    :param valid_ranges: A list of (low, high) inclusive bounds; a number
+        outside every range is discarded as an implausible or
+        mis-scaled value rather than being stored as-is.
+    :type valid_ranges: list[tuple(float, float)] or None
+    :returns: The extracted number, or None if text is missing, has no
+        number, or the number falls outside every given valid range.
+    :rtype: float or None
     """
     if not text:
         return None
@@ -79,19 +84,28 @@ def _extract_number(text, valid_ranges=None):
 
 def _normalize_nationality(value):
     """
-    Maps a scraped US/International value to 'American' or 'International'
-    case-insensitively, or 'Other' for anything else (including values that
-    were scraped from the wrong tag and aren't a nationality at all).
-    Returns a string.
+    Map a scraped US/International value to 'American' or
+    'International' case-insensitively, or 'Other' for anything else
+    (including values that were scraped from the wrong tag and aren't a
+    nationality at all).
+
+    :param value: The scraped US/International value.
+    :type value: str
+    :returns: 'American', 'International', or 'Other'.
+    :rtype: str
     """
     return NATIONALITY_VALUES.get(value.strip().lower(), "Other")
 
 
 def _parse_date_added(text):
     """
-    Parses a "date added" string such as "Added on Sep 12, 2026" into a date.
-    Raises ValueError if text doesn't match the expected format.
-    Returns a date object.
+    Parse a "date added" string such as "Added on Sep 12, 2026" into a date.
+
+    :param text: The "date added" string to parse.
+    :type text: str
+    :raises ValueError: If text doesn't match the expected format.
+    :returns: The parsed date.
+    :rtype: datetime.date
     """
     cleaned = text.removeprefix("Added on ").strip()
     return datetime.strptime(cleaned, "%b %d, %Y").date()
@@ -99,9 +113,13 @@ def _parse_date_added(text):
 
 def _extract_result_id(url):
     """
-    Pulls the numeric Grad Cafe result ID out of a result URL, for use as
+    Pull the numeric Grad Cafe result ID out of a result URL, for use as
     the table's p_id.
-    Returns an integer, or None if no ID could be found in the URL.
+
+    :param url: The result URL to extract an ID from.
+    :type url: str or None
+    :returns: The extracted ID, or None if none could be found in the URL.
+    :rtype: int or None
     """
     match = re.search(r"/result/(\d+)", url or "")
     return int(match.group(1)) if match else None
@@ -109,10 +127,14 @@ def _extract_result_id(url):
 
 def _build_row(result):
     """
-    Validates and transforms a single scraped result into a row ready for
+    Validate and transform a single scraped result into a row ready for
     insertion into the applicants table.
-    Raises InvalidResult if any required field is missing or invalid.
-    Returns a dictionary of column values.
+
+    :param result: The raw scraped result.
+    :type result: dict
+    :raises InvalidResult: If any required field is missing or invalid.
+    :returns: A dictionary of column values.
+    :rtype: dict
     """
     missing = [column for key, column in REQUIRED_FIELDS.items() if not result.get(key)]
 
@@ -151,8 +173,14 @@ def _build_row(result):
 
 def _chunked(items, size):
     """
-    Splits items into consecutive lists of at most size items each.
-    Returns a generator of lists.
+    Split items into consecutive lists of at most size items each.
+
+    :param items: The items to split.
+    :type items: list
+    :param size: The maximum size of each chunk.
+    :type size: int
+    :returns: A generator of lists.
+    :rtype: Iterator[list]
     """
     for i in range(0, len(items), size):
         yield items[i:i + size]
@@ -163,13 +191,19 @@ UPDATE_COLUMNS = [column for column in COLUMNS if column not in ("p_id", "url")]
 
 def _insert_batch(cursor, batch):
     """
-    Inserts or upserts a batch of rows into the applicants table in a
+    Insert or upsert a batch of rows into the applicants table in a
     single statement. When a row's url already exists, its columns are
     updated with the new values, keeping the existing value for any
     column the new data doesn't provide (COALESCE), so loading a file
     that adds optional fields (such as llm_generated_program) fills them
     in on already-loaded results instead of being skipped.
-    Returns a tuple of (set of newly inserted urls, set of updated urls).
+
+    :param cursor: An open database cursor.
+    :type cursor: psycopg.Cursor
+    :param batch: The rows to insert or upsert.
+    :type batch: list[dict]
+    :returns: A tuple of (set of newly inserted urls, set of updated urls).
+    :rtype: tuple(set, set)
     """
     placeholder_group = "(" + ", ".join(["%s"] * len(COLUMNS)) + ")"
     values_clause = ", ".join([placeholder_group] * len(batch))
@@ -198,13 +232,21 @@ def _insert_batch(cursor, batch):
 
 def _insert_with_fallback(conn, cursor, batch):
     """
-    Upserts a batch of rows, using a savepoint so a failure only rolls
+    Upsert a batch of rows, using a savepoint so a failure only rolls
     back this attempt rather than the whole load. If the batch fails, it
     is split in half and each half is retried the same way, continuing
     until batches are at most SMALL_BATCH_SIZE rows, at which point rows
     are upserted one at a time so a bad row can be reported individually
     instead of losing every row around it.
-    Returns a tuple of (set of newly inserted urls, set of updated urls).
+
+    :param conn: An open database connection.
+    :type conn: psycopg.Connection
+    :param cursor: An open database cursor on conn.
+    :type cursor: psycopg.Cursor
+    :param batch: The rows to insert or upsert.
+    :type batch: list[dict]
+    :returns: A tuple of (set of newly inserted urls, set of updated urls).
+    :rtype: tuple(set, set)
     """
     if len(batch) <= SMALL_BATCH_SIZE:
         inserted = set()
@@ -231,11 +273,15 @@ def _insert_with_fallback(conn, cursor, batch):
 
 def _clear_invalid_scores(cursor):
     """
-    Nulls out gpa, gre, gre_v, and gre_aw values already in the table
+    Null out gpa, gre, gre_v, and gre_aw values already in the table
     that fall outside their valid score ranges, so implausible or
     mis-scaled values loaded before this validation existed don't skew
     analysis. Prints how many values were cleared for each column.
-    Returns none.
+
+    :param cursor: An open database cursor.
+    :type cursor: psycopg.Cursor
+    :returns: None.
+    :rtype: None
     """
     cursor.execute(
         "UPDATE applicants SET gpa = NULL "
@@ -272,12 +318,16 @@ def _clear_invalid_scores(cursor):
 
 def _normalize_existing_nationality(cursor):
     """
-    Sets us_or_international to 'Other' for rows already in the table
+    Set us_or_international to 'Other' for rows already in the table
     whose value isn't 'American' or 'International', so a value scraped
     from the wrong tag (such as a stray "0") doesn't get counted as a
     usable nationality classification it isn't. Prints how many rows were
     changed.
-    Returns none.
+
+    :param cursor: An open database cursor.
+    :type cursor: psycopg.Cursor
+    :returns: None.
+    :rtype: None
     """
     cursor.execute(
         "UPDATE applicants SET us_or_international = 'Other' "
@@ -291,7 +341,7 @@ def _normalize_existing_nationality(cursor):
 
 def load_data(filepath, database_url: str):
     """
-    Loads applicant results from a JSON file into the applicants table.
+    Load applicant results from a JSON file into the applicants table.
     Results missing required fields are skipped and reported. A result
     whose url already exists in the table is upserted rather than
     skipped, so a file that adds optional fields not present in an
@@ -302,11 +352,19 @@ def load_data(filepath, database_url: str):
     and any us_or_international value that isn't 'American' or
     'International' is normalized to 'Other', in this file and in the
     table already.
-    Returns True if the file was read and the database reached (even if
-    some individual results were skipped as invalid), or False if the
-    file couldn't be read or the database couldn't be reached at all -
-    callers (the CLI entry point, the Pull Data upload step) use this to
-    tell an unsuccessful load apart from a completed one.
+
+    :param filepath: Path to the JSON results file to load.
+    :type filepath: str or pathlib.Path
+    :param database_url: A "postgresql://user:password@host:port/dbname"
+        connection string.
+    :type database_url: str
+    :returns: True if the file was read and the database reached (even
+        if some individual results were skipped as invalid), or False
+        if the file couldn't be read or the database couldn't be
+        reached at all - callers (the CLI entry point, the Pull Data
+        upload step) use this to tell an unsuccessful load apart from a
+        completed one.
+    :rtype: bool
     """
     try:
         with open(filepath, "r") as f:
@@ -359,8 +417,11 @@ def load_data(filepath, database_url: str):
 
 def parse_args():
     """
-    Parses CLI arguments for loading a results file into PostgreSQL
+    Parse CLI arguments for loading a results file into PostgreSQL
     directly.
+
+    :returns: Parsed arguments with a `relative_filepath` attribute.
+    :rtype: argparse.Namespace
     """
     parser = argparse.ArgumentParser(
         description="Load a results file into the PostgreSQL applicants table."

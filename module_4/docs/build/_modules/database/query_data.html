@@ -1,0 +1,452 @@
+
+
+<!DOCTYPE html>
+<html class="writer-html5" lang="en" data-content_root="../../">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>database.query_data &mdash; GradCafe Analytics 1.0 documentation</title>
+      <link rel="stylesheet" type="text/css" href="../../_static/pygments.css?v=b86133f3" />
+      <link rel="stylesheet" type="text/css" href="../../_static/css/theme.css?v=9edc463e" />
+
+  
+      <script src="../../_static/jquery.js?v=5d32c60e"></script>
+      <script src="../../_static/_sphinx_javascript_frameworks_compat.js?v=2cd50e6c"></script>
+      <script src="../../_static/documentation_options.js?v=f2a433a1"></script>
+      <script src="../../_static/doctools.js?v=fd6eb6e6"></script>
+      <script src="../../_static/sphinx_highlight.js?v=6ffebe34"></script>
+    <script src="../../_static/js/theme.js"></script>
+    <link rel="index" title="Index" href="../../genindex.html" />
+    <link rel="search" title="Search" href="../../search.html" /> 
+</head>
+
+<body class="wy-body-for-nav"> 
+  <div class="wy-grid-for-nav">
+    <nav data-toggle="wy-nav-shift" class="wy-nav-side">
+      <div class="wy-side-scroll">
+        <div class="wy-side-nav-search" >
+
+          
+          
+          <a href="../../index.html" class="icon icon-home">
+            GradCafe Analytics
+          </a>
+<div role="search">
+  <form id="rtd-search-form" class="wy-form" action="../../search.html" method="get">
+    <input type="text" name="q" placeholder="Search docs" aria-label="Search docs" />
+    <input type="hidden" name="check_keywords" value="yes" />
+    <input type="hidden" name="area" value="default" />
+  </form>
+</div>
+        </div><div class="wy-menu wy-menu-vertical" data-spy="affix" role="navigation" aria-label="Navigation menu">
+              <p class="caption" role="heading"><span class="caption-text">Contents:</span></p>
+<ul>
+<li class="toctree-l1"><a class="reference internal" href="../../overview_setup.html">Overview &amp; Setup</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../architecture.html">Architecture</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../modules/modules.html">API Reference</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../testing_guide.html">Testing Guide</a></li>
+</ul>
+
+        </div>
+      </div>
+    </nav>
+
+    <section data-toggle="wy-nav-shift" class="wy-nav-content-wrap"><nav class="wy-nav-top" aria-label="Mobile navigation menu" >
+          <i data-toggle="wy-nav-top" class="fa fa-bars"></i>
+          <a href="../../index.html">GradCafe Analytics</a>
+      </nav>
+
+      <div class="wy-nav-content">
+        <div class="rst-content">
+          <div role="navigation" aria-label="Page navigation">
+  <ul class="wy-breadcrumbs">
+      <li><a href="../../index.html" class="icon icon-home" aria-label="Home"></a></li>
+          <li class="breadcrumb-item"><a href="../index.html">Module code</a></li>
+      <li class="breadcrumb-item active">database.query_data</li>
+      <li class="wy-breadcrumbs-aside">
+      </li>
+  </ul>
+  <hr/>
+</div>
+          <div role="main" class="document" itemscope="itemscope" itemtype="http://schema.org/Article">
+           <div itemprop="articleBody">
+             
+  <h1>Source code for database.query_data</h1><div class="highlight"><pre>
+<span></span><span class="sd">"""</span>
+<span class="sd">`query_data.py`</span>
+<span class="sd">Prints answers for Part 2: SQL Query Analysis. Run directly</span>
+<span class="sd">(`python query_data.py`, with DATABASE_URL set) to print every</span>
+<span class="sd">answer; `analyze` can also be imported and called on its own.</span>
+<span class="sd">"""</span>
+<span class="kn">import</span><span class="w"> </span><span class="nn">os</span>
+<span class="kn">import</span><span class="w"> </span><span class="nn">sys</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">pathlib</span><span class="w"> </span><span class="kn">import</span> <span class="n">Path</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">typing</span><span class="w"> </span><span class="kn">import</span> <span class="n">Callable</span>
+<span class="kn">import</span><span class="w"> </span><span class="nn">psycopg</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">psycopg.rows</span><span class="w"> </span><span class="kn">import</span> <span class="n">dict_row</span>
+
+<span class="c1"># Ensures db_helpers resolves whether query_data.py is run directly or</span>
+<span class="c1"># imported as database.query_data from elsewhere in the package.</span>
+<span class="n">sys</span><span class="o">.</span><span class="n">path</span><span class="o">.</span><span class="n">insert</span><span class="p">(</span><span class="mi">0</span><span class="p">,</span> <span class="nb">str</span><span class="p">(</span><span class="n">Path</span><span class="p">(</span><span class="vm">__file__</span><span class="p">)</span><span class="o">.</span><span class="n">resolve</span><span class="p">()</span><span class="o">.</span><span class="n">parent</span><span class="p">))</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">db_helpers</span><span class="w"> </span><span class="kn">import</span> <span class="n">connect_db</span><span class="p">,</span> <span class="n">disconnect_db</span>
+
+
+<span class="k">def</span><span class="w"> </span><span class="nf">_format_q1</span><span class="p">(</span><span class="n">rows</span><span class="p">):</span>
+    <span class="k">return</span> <span class="sa">f</span><span class="s2">"Applicant count: </span><span class="si">{</span><span class="n">rows</span><span class="p">[</span><span class="mi">0</span><span class="p">][</span><span class="s1">'cnt_fall26'</span><span class="p">]</span><span class="si">}</span><span class="s2">"</span>
+
+
+<span class="k">def</span><span class="w"> </span><span class="nf">_format_q2</span><span class="p">(</span><span class="n">rows</span><span class="p">):</span>
+    <span class="k">return</span> <span class="sa">f</span><span class="s2">"International percentage: </span><span class="si">{</span><span class="n">rows</span><span class="p">[</span><span class="mi">0</span><span class="p">][</span><span class="s1">'pct_intl'</span><span class="p">]</span><span class="si">}</span><span class="s2">"</span>
+
+
+<span class="k">def</span><span class="w"> </span><span class="nf">_format_q3</span><span class="p">(</span><span class="n">rows</span><span class="p">):</span>
+    <span class="n">r</span> <span class="o">=</span> <span class="n">rows</span><span class="p">[</span><span class="mi">0</span><span class="p">]</span>
+    <span class="k">return</span> <span class="p">(</span><span class="sa">f</span><span class="s2">"Average GPA: </span><span class="si">{</span><span class="n">r</span><span class="p">[</span><span class="s1">'avg_gpa'</span><span class="p">]</span><span class="si">}</span><span class="s2">, Average GRE: </span><span class="si">{</span><span class="n">r</span><span class="p">[</span><span class="s1">'avg_gre'</span><span class="p">]</span><span class="si">}</span><span class="s2">, "</span>
+            <span class="sa">f</span><span class="s2">"Average GRE V: </span><span class="si">{</span><span class="n">r</span><span class="p">[</span><span class="s1">'avg_gre_v'</span><span class="p">]</span><span class="si">}</span><span class="s2">, Average GRE AW: </span><span class="si">{</span><span class="n">r</span><span class="p">[</span><span class="s1">'avg_gre_aw'</span><span class="p">]</span><span class="si">}</span><span class="s2">"</span><span class="p">)</span>
+
+
+<span class="k">def</span><span class="w"> </span><span class="nf">_format_q4</span><span class="p">(</span><span class="n">rows</span><span class="p">):</span>
+    <span class="k">return</span> <span class="sa">f</span><span class="s2">"Average GPA American: </span><span class="si">{</span><span class="n">rows</span><span class="p">[</span><span class="mi">0</span><span class="p">][</span><span class="s1">'avg_gpa_us_fall26'</span><span class="p">]</span><span class="si">}</span><span class="s2">"</span>
+
+
+<span class="k">def</span><span class="w"> </span><span class="nf">_format_q5</span><span class="p">(</span><span class="n">rows</span><span class="p">):</span>
+    <span class="k">return</span> <span class="sa">f</span><span class="s2">"Percentage accepted: </span><span class="si">{</span><span class="n">rows</span><span class="p">[</span><span class="mi">0</span><span class="p">][</span><span class="s1">'pct_accepted_fall25'</span><span class="p">]</span><span class="si">}</span><span class="s2">"</span>
+
+
+<span class="k">def</span><span class="w"> </span><span class="nf">_format_q6</span><span class="p">(</span><span class="n">rows</span><span class="p">):</span>
+    <span class="k">return</span> <span class="sa">f</span><span class="s2">"Average GPA accepted: </span><span class="si">{</span><span class="n">rows</span><span class="p">[</span><span class="mi">0</span><span class="p">][</span><span class="s1">'avg_gpa_accepted_fall26'</span><span class="p">]</span><span class="si">}</span><span class="s2">"</span>
+
+
+<span class="k">def</span><span class="w"> </span><span class="nf">_format_q7</span><span class="p">(</span><span class="n">rows</span><span class="p">):</span>
+    <span class="k">return</span> <span class="sa">f</span><span class="s2">"JHU Masters Computer Science count: </span><span class="si">{</span><span class="n">rows</span><span class="p">[</span><span class="mi">0</span><span class="p">][</span><span class="s1">'cnt_jhu_ms_cs'</span><span class="p">]</span><span class="si">}</span><span class="s2">"</span>
+
+
+<span class="k">def</span><span class="w"> </span><span class="nf">_format_q8</span><span class="p">(</span><span class="n">rows</span><span class="p">):</span>
+    <span class="k">return</span> <span class="sa">f</span><span class="s2">"PhD Computer Science at listed schools: </span><span class="si">{</span><span class="n">rows</span><span class="p">[</span><span class="mi">0</span><span class="p">][</span><span class="s1">'cnt_fall26_cs_phd'</span><span class="p">]</span><span class="si">}</span><span class="s2">"</span>
+
+
+<span class="k">def</span><span class="w"> </span><span class="nf">_format_q9</span><span class="p">(</span><span class="n">rows</span><span class="p">):</span>
+    <span class="n">r</span> <span class="o">=</span> <span class="n">rows</span><span class="p">[</span><span class="mi">0</span><span class="p">]</span>
+    <span class="k">return</span> <span class="p">(</span><span class="sa">f</span><span class="s2">"PhD Computer Science at listed schools: </span><span class="si">{</span><span class="n">r</span><span class="p">[</span><span class="s1">'cnt_fall26_cs_phd_original'</span><span class="p">]</span><span class="si">}</span><span class="s2">, "</span>
+            <span class="sa">f</span><span class="s2">"PhD Computer Science at listed schools (LLM): </span><span class="si">{</span><span class="n">r</span><span class="p">[</span><span class="s1">'cnt_fall26_cs_phd_llm'</span><span class="p">]</span><span class="si">}</span><span class="s2">, "</span>
+            <span class="sa">f</span><span class="s2">"Difference: </span><span class="si">{</span><span class="n">r</span><span class="p">[</span><span class="s1">'llm_less_original'</span><span class="p">]</span><span class="si">:</span><span class="s2">+d</span><span class="si">}</span><span class="s2">"</span><span class="p">)</span>
+
+
+<span class="k">def</span><span class="w"> </span><span class="nf">_format_a1</span><span class="p">(</span><span class="n">rows</span><span class="p">):</span>
+    <span class="k">return</span> <span class="s2">", "</span><span class="o">.</span><span class="n">join</span><span class="p">(</span><span class="sa">f</span><span class="s2">"</span><span class="si">{</span><span class="n">row</span><span class="p">[</span><span class="s1">'term'</span><span class="p">]</span><span class="si">}</span><span class="s2"> acceptance: </span><span class="si">{</span><span class="n">row</span><span class="p">[</span><span class="s1">'pct_of_acceptances'</span><span class="p">]</span><span class="si">}</span><span class="s2">"</span> <span class="k">for</span> <span class="n">row</span> <span class="ow">in</span> <span class="n">rows</span><span class="p">)</span>
+
+
+<span class="k">def</span><span class="w"> </span><span class="nf">_format_a2</span><span class="p">(</span><span class="n">rows</span><span class="p">):</span>
+    <span class="n">r</span> <span class="o">=</span> <span class="n">rows</span><span class="p">[</span><span class="mi">0</span><span class="p">]</span>
+    <span class="k">return</span> <span class="p">(</span><span class="sa">f</span><span class="s2">"USC average GPA accepted: </span><span class="si">{</span><span class="n">r</span><span class="p">[</span><span class="s1">'avg_gpa_accepted_usc'</span><span class="p">]</span><span class="si">}</span><span class="s2">, "</span>
+            <span class="sa">f</span><span class="s2">"USC average GPA not accepted: </span><span class="si">{</span><span class="n">r</span><span class="p">[</span><span class="s1">'avg_gpa_not_accepted_usc'</span><span class="p">]</span><span class="si">}</span><span class="s2">, "</span>
+            <span class="sa">f</span><span class="s2">"Difference: </span><span class="si">{</span><span class="n">r</span><span class="p">[</span><span class="s1">'gpa_diff'</span><span class="p">]</span><span class="si">}</span><span class="s2">"</span><span class="p">)</span>
+
+
+<span class="n">QUESTION_QUERY</span> <span class="o">=</span> <span class="p">[</span>
+    <span class="p">(</span>
+        <span class="s2">"Q1: How many entries in your database are from applicants who applied for Fall 2026?"</span><span class="p">,</span>
+<span class="w">        </span><span class="sd">"""</span>
+<span class="sd">        SELECT COUNT(*) AS cnt_fall26</span>
+<span class="sd">        FROM applicants</span>
+<span class="sd">        WHERE term ILIKE 'Fall 2026'</span>
+<span class="sd">        """</span><span class="p">,</span>
+        <span class="n">_format_q1</span>
+    <span class="p">),</span>
+    <span class="p">(</span>
+        <span class="s2">"Q2: Among entries that provide a nationality classification, what "</span>
+        <span class="s2">"percentage are international students?"</span><span class="p">,</span>
+<span class="w">        </span><span class="sd">"""</span>
+<span class="sd">        SELECT</span>
+<span class="sd">            ROUND(</span>
+<span class="sd">                SUM(</span>
+<span class="sd">                    CASE WHEN us_or_international ILIKE 'International' THEN 1</span>
+<span class="sd">                    ELSE 0</span>
+<span class="sd">                    END</span>
+<span class="sd">                ) * 100.0 / COUNT(*),</span>
+<span class="sd">            2) || '%' AS pct_intl</span>
+<span class="sd">        FROM applicants</span>
+<span class="sd">        WHERE us_or_international IS NOT NULL</span>
+<span class="sd">            AND us_or_international != ''</span>
+<span class="sd">        """</span><span class="p">,</span>
+        <span class="n">_format_q2</span>
+    <span class="p">),</span>
+    <span class="p">(</span>
+        <span class="s2">"Q3: What are the average GPA, GRE Quantitative, GRE Verbal, and GRE "</span>
+        <span class="s2">"Analytical Writing scores of applicants who provide each metric?"</span><span class="p">,</span>
+<span class="w">        </span><span class="sd">"""</span>
+<span class="sd">        WITH avg_gpa AS (</span>
+<span class="sd">            SELECT ROUND(AVG(gpa)::numeric, 2) as avg_gpa</span>
+<span class="sd">            FROM applicants</span>
+<span class="sd">            WHERE gpa IS NOT NULL</span>
+<span class="sd">        ),</span>
+<span class="sd">        avg_gre AS (</span>
+<span class="sd">            SELECT ROUND(AVG(gre)::numeric, 2) as avg_gre</span>
+<span class="sd">            FROM applicants</span>
+<span class="sd">            WHERE gre IS NOT NULL</span>
+<span class="sd">        ),</span>
+<span class="sd">        avg_gre_v AS (</span>
+<span class="sd">            SELECT ROUND(AVG(gre_v)::numeric, 2) as avg_gre_v</span>
+<span class="sd">            FROM applicants</span>
+<span class="sd">            WHERE gre_v IS NOT NULL</span>
+<span class="sd">        ),</span>
+<span class="sd">        avg_gre_aw AS (</span>
+<span class="sd">            SELECT ROUND(AVG(gre_aw)::numeric, 2) as avg_gre_aw</span>
+<span class="sd">            FROM applicants</span>
+<span class="sd">            WHERE gre_aw IS NOT NULL</span>
+<span class="sd">        )</span>
+<span class="sd">        SELECT *</span>
+<span class="sd">        FROM avg_gpa, avg_gre, avg_gre_v, avg_gre_aw</span>
+<span class="sd">        """</span><span class="p">,</span>
+        <span class="n">_format_q3</span>
+    <span class="p">),</span>
+    <span class="p">(</span>
+        <span class="s2">"Q4: What is the average GPA of American applicants who applied for Fall 2026?"</span><span class="p">,</span>
+<span class="w">        </span><span class="sd">"""</span>
+<span class="sd">        SELECT ROUND(AVG(gpa)::numeric, 2) as avg_gpa_us_fall26</span>
+<span class="sd">        FROM applicants</span>
+<span class="sd">        WHERE gpa IS NOT NULL</span>
+<span class="sd">            AND us_or_international ILIKE 'American'</span>
+<span class="sd">            AND term ILIKE 'Fall 2026'</span>
+<span class="sd">        """</span><span class="p">,</span>
+        <span class="n">_format_q4</span>
+    <span class="p">),</span>
+    <span class="p">(</span>
+        <span class="s2">"Q5: What percentage of Fall 2025 entries are acceptances?"</span><span class="p">,</span>
+<span class="w">        </span><span class="sd">"""</span>
+<span class="sd">        SELECT</span>
+<span class="sd">            ROUND(</span>
+<span class="sd">                SUM(</span>
+<span class="sd">                    CASE WHEN status ILIKE 'Accepted%' THEN 1</span>
+<span class="sd">                    ELSE 0</span>
+<span class="sd">                    END</span>
+<span class="sd">                ) * 100.0 / COUNT(*),</span>
+<span class="sd">            2) || '%' AS pct_accepted_fall25</span>
+<span class="sd">        FROM applicants</span>
+<span class="sd">        WHERE term ILIKE 'Fall 2025'</span>
+<span class="sd">        """</span><span class="p">,</span>
+        <span class="n">_format_q5</span>
+    <span class="p">),</span>
+    <span class="p">(</span>
+        <span class="s2">"Q6: What is the average GPA of accepted applicants who applied for Fall 2026?"</span><span class="p">,</span>
+<span class="w">        </span><span class="sd">"""</span>
+<span class="sd">        SELECT</span>
+<span class="sd">            ROUND(AVG(gpa)::numeric, 2) avg_gpa_accepted_fall26</span>
+<span class="sd">        FROM applicants</span>
+<span class="sd">        WHERE term ILIKE 'Fall 2026'</span>
+<span class="sd">            AND gpa IS NOT NULL</span>
+<span class="sd">            AND status ILIKE 'Accepted%'</span>
+<span class="sd">        """</span><span class="p">,</span>
+        <span class="n">_format_q6</span>
+    <span class="p">),</span>
+    <span class="p">(</span>
+        <span class="s2">"Q7: How many entries are from applicants who applied to Johns Hopkins "</span>
+        <span class="s2">"University for a master's degree in Computer Science?"</span><span class="p">,</span>
+<span class="w">        </span><span class="sd">"""</span>
+<span class="sd">        SELECT COUNT(*) AS cnt_jhu_ms_cs</span>
+<span class="sd">        FROM applicants</span>
+<span class="sd">        WHERE degree ILIKE 'Masters'</span>
+<span class="sd">            AND program ILIKE 'Computer Science, %'</span>
+<span class="sd">            AND (program ILIKE '%, Johns Hopkins University%'</span>
+<span class="sd">                OR program ILIKE '%, JHU%')</span>
+<span class="sd">        """</span><span class="p">,</span>
+        <span class="n">_format_q7</span>
+    <span class="p">),</span>
+    <span class="p">(</span>
+        <span class="s2">"Q8: How many Fall 2026 entries are acceptances from applicants applying "</span>
+        <span class="s2">"for a PhD in Computer Science at one of the following universities? "</span>
+        <span class="s2">"Georgetown University, Massachusetts Institute of Technology / MIT, "</span>
+        <span class="s2">"Stanford University, Carnegie Mellon University"</span><span class="p">,</span>
+<span class="w">        </span><span class="sd">"""</span>
+<span class="sd">        SELECT COUNT(*) AS cnt_fall26_cs_phd</span>
+<span class="sd">        FROM applicants</span>
+<span class="sd">        WHERE term ILIKE 'Fall 2026'</span>
+<span class="sd">            AND degree ILIKE 'PhD'</span>
+<span class="sd">            AND status ILIKE 'Accepted%'</span>
+<span class="sd">            AND program ILIKE 'Computer Science, %'</span>
+<span class="sd">            AND (program ILIKE '%, Georgetown University'</span>
+<span class="sd">                OR program ILIKE '%, Massachusetts Institute of Technology'</span>
+<span class="sd">                OR program ILIKE '%, MIT'</span>
+<span class="sd">                OR program ILIKE '%, Stanford University'</span>
+<span class="sd">                OR program ILIKE '%, Carnegie Mellon University')</span>
+<span class="sd">        """</span><span class="p">,</span>
+        <span class="n">_format_q8</span>
+    <span class="p">),</span>
+    <span class="p">(</span>
+        <span class="s2">"Q9: Repeat Question 8, but identify the university and program using "</span>
+        <span class="s2">"llm_generated_program and llm_generated_university"</span><span class="p">,</span>
+<span class="w">        </span><span class="sd">"""</span>
+<span class="sd">        WITH q8 AS (</span>
+<span class="sd">        SELECT COUNT(*) AS cnt</span>
+<span class="sd">        FROM applicants</span>
+<span class="sd">        WHERE term ILIKE 'Fall 2026'</span>
+<span class="sd">            AND degree ILIKE 'PhD'</span>
+<span class="sd">            AND status ILIKE 'Accepted%'</span>
+<span class="sd">            AND program ILIKE 'Computer Science, %'</span>
+<span class="sd">            AND (program ILIKE '%, Georgetown University'</span>
+<span class="sd">                OR program ILIKE '%, Massachusetts Institute of Technology'</span>
+<span class="sd">                OR program ILIKE '%, MIT'</span>
+<span class="sd">                OR program ILIKE '%, Stanford University'</span>
+<span class="sd">                OR program ILIKE '%, Carnegie Mellon University')</span>
+<span class="sd">        ),</span>
+<span class="sd">        q9 AS (</span>
+<span class="sd">        SELECT COUNT(*) AS cnt</span>
+<span class="sd">        FROM applicants</span>
+<span class="sd">        WHERE term ILIKE 'Fall 2026'</span>
+<span class="sd">            AND degree ILIKE 'PhD'</span>
+<span class="sd">            AND status ILIKE 'Accepted%'</span>
+<span class="sd">            AND llm_generated_program ILIKE 'Computer Science'</span>
+<span class="sd">            AND (llm_generated_university ILIKE 'Georgetown University'</span>
+<span class="sd">                OR llm_generated_university ILIKE 'Massachusetts Institute of Technology'</span>
+<span class="sd">                OR llm_generated_university ILIKE 'MIT'</span>
+<span class="sd">                OR llm_generated_university ILIKE 'Stanford University'</span>
+<span class="sd">                OR llm_generated_university ILIKE 'Carnegie Mellon University')</span>
+<span class="sd">        )</span>
+<span class="sd">        SELECT q8.cnt AS cnt_fall26_cs_phd_original,</span>
+<span class="sd">                q9.cnt AS cnt_fall26_cs_phd_llm,</span>
+<span class="sd">                (q9.cnt - q8.cnt) AS llm_less_original</span>
+<span class="sd">        FROM q8, q9</span>
+<span class="sd">        """</span><span class="p">,</span>
+        <span class="n">_format_q9</span>
+    <span class="p">),</span>
+    <span class="p">(</span>
+        <span class="s2">"A1: What percentage of total acceptances come from each term found in the data?"</span><span class="p">,</span>
+<span class="w">        </span><span class="sd">"""</span>
+<span class="sd">        WITH accepted AS (</span>
+<span class="sd">            SELECT term, COUNT(*) AS cnt</span>
+<span class="sd">            FROM applicants</span>
+<span class="sd">            WHERE status ILIKE 'Accepted%'</span>
+<span class="sd">            GROUP BY term</span>
+<span class="sd">        ),</span>
+<span class="sd">        total_accepted AS (</span>
+<span class="sd">            SELECT COUNT(*) AS cnt</span>
+<span class="sd">            FROM applicants</span>
+<span class="sd">            WHERE status ILIKE 'Accepted%'</span>
+<span class="sd">        )</span>
+<span class="sd">        SELECT accepted.term,</span>
+<span class="sd">                ROUND(accepted.cnt * 100.0 / total_accepted.cnt, 2) || '%' AS pct_of_acceptances</span>
+<span class="sd">        FROM accepted, total_accepted</span>
+<span class="sd">        ORDER BY split_part(accepted.term, ' ', 2)::int,</span>
+<span class="sd">                CASE WHEN accepted.term LIKE 'Spring%' THEN 0 ELSE 1 END</span>
+<span class="sd">        """</span><span class="p">,</span>
+        <span class="n">_format_a1</span>
+    <span class="p">),</span>
+    <span class="p">(</span>
+        <span class="s2">"A2: What is the average GPA for students accepted to University of "</span>
+        <span class="s2">"Southern California / USC, the average GPA for students not accepted "</span>
+        <span class="s2">"there, and the difference in GPA?"</span><span class="p">,</span>
+<span class="w">        </span><span class="sd">"""</span>
+<span class="sd">        WITH usc AS (</span>
+<span class="sd">            SELECT gpa, status</span>
+<span class="sd">            FROM applicants</span>
+<span class="sd">            WHERE gpa IS NOT NULL</span>
+<span class="sd">                AND (program ILIKE '%, University of Southern California'</span>
+<span class="sd">                    OR program ILIKE '%, USC')</span>
+<span class="sd">        ),</span>
+<span class="sd">        accepted_avg AS (</span>
+<span class="sd">            SELECT ROUND(AVG(gpa)::numeric, 2) AS avg_gpa</span>
+<span class="sd">            FROM usc</span>
+<span class="sd">            WHERE status ILIKE 'Accepted%'</span>
+<span class="sd">        ),</span>
+<span class="sd">        not_accepted_avg AS (</span>
+<span class="sd">            SELECT ROUND(AVG(gpa)::numeric, 2) AS avg_gpa</span>
+<span class="sd">            FROM usc</span>
+<span class="sd">            WHERE status NOT ILIKE 'Accepted%'</span>
+<span class="sd">        )</span>
+<span class="sd">        SELECT accepted_avg.avg_gpa AS avg_gpa_accepted_usc,</span>
+<span class="sd">                not_accepted_avg.avg_gpa AS avg_gpa_not_accepted_usc,</span>
+<span class="sd">                (accepted_avg.avg_gpa - not_accepted_avg.avg_gpa) AS gpa_diff</span>
+<span class="sd">        FROM accepted_avg, not_accepted_avg</span>
+<span class="sd">        """</span><span class="p">,</span>
+        <span class="n">_format_a2</span>
+    <span class="p">)</span>
+<span class="p">]</span>
+
+
+<div class="viewcode-block" id="analyze">
+<a class="viewcode-back" href="../../modules/database.query_data.html#database.query_data.analyze">[docs]</a>
+<span class="k">def</span><span class="w"> </span><span class="nf">analyze</span><span class="p">(</span><span class="n">question_query</span><span class="p">:</span> <span class="nb">list</span><span class="p">[</span><span class="nb">tuple</span><span class="p">[</span><span class="nb">str</span><span class="p">,</span> <span class="nb">str</span><span class="p">,</span> <span class="n">Callable</span><span class="p">[[</span><span class="nb">list</span><span class="p">[</span><span class="nb">dict</span><span class="p">]],</span> <span class="nb">str</span><span class="p">]]],</span> <span class="n">database_url</span><span class="p">:</span> <span class="nb">str</span><span class="p">):</span>
+<span class="w">    </span><span class="sd">"""</span>
+<span class="sd">    Run each (question, query, format_result) tuple's query and print</span>
+<span class="sd">    its answer using format_result. If a query fails, its error is</span>
+<span class="sd">    printed in place of an answer and the remaining questions are still</span>
+<span class="sd">    attempted instead of stopping the whole analysis.</span>
+
+<span class="sd">    :param question_query: A list of (question, SQL query, result</span>
+<span class="sd">        formatter) tuples.</span>
+<span class="sd">    :type question_query: list[tuple(str, str, Callable[[list[dict]], str])]</span>
+<span class="sd">    :param database_url: A "postgresql://user:password@host:port/dbname"</span>
+<span class="sd">        connection string.</span>
+<span class="sd">    :type database_url: str</span>
+<span class="sd">    :returns: None.</span>
+<span class="sd">    :rtype: None</span>
+<span class="sd">    """</span>
+    <span class="k">if</span> <span class="nb">len</span><span class="p">(</span><span class="n">question_query</span><span class="p">)</span> <span class="o">==</span> <span class="mi">0</span><span class="p">:</span>
+        <span class="nb">print</span><span class="p">(</span><span class="s2">"No questions or queries submitted"</span><span class="p">)</span>
+        <span class="k">return</span>
+    <span class="n">conn</span> <span class="o">=</span> <span class="n">connect_db</span><span class="p">(</span><span class="n">database_url</span><span class="p">)</span>
+    <span class="k">if</span> <span class="n">conn</span> <span class="ow">is</span> <span class="kc">None</span><span class="p">:</span>
+        <span class="k">return</span>
+    <span class="k">try</span><span class="p">:</span>
+        <span class="k">with</span> <span class="n">conn</span><span class="p">:</span>
+            <span class="k">with</span> <span class="n">conn</span><span class="o">.</span><span class="n">cursor</span><span class="p">(</span><span class="n">row_factory</span><span class="o">=</span><span class="n">dict_row</span><span class="p">)</span> <span class="k">as</span> <span class="n">cursor</span><span class="p">:</span>
+                <span class="k">for</span> <span class="n">question</span><span class="p">,</span> <span class="n">query</span><span class="p">,</span> <span class="n">format_result</span> <span class="ow">in</span> <span class="n">question_query</span><span class="p">:</span>
+                    <span class="k">try</span><span class="p">:</span>
+                        <span class="k">with</span> <span class="n">conn</span><span class="o">.</span><span class="n">transaction</span><span class="p">():</span>
+                            <span class="n">cursor</span><span class="o">.</span><span class="n">execute</span><span class="p">(</span><span class="n">query</span><span class="p">)</span>
+                            <span class="nb">print</span><span class="p">(</span><span class="n">format_result</span><span class="p">(</span><span class="n">cursor</span><span class="o">.</span><span class="n">fetchall</span><span class="p">()))</span>
+                    <span class="k">except</span> <span class="n">psycopg</span><span class="o">.</span><span class="n">DatabaseError</span> <span class="k">as</span> <span class="n">error</span><span class="p">:</span>
+                        <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">"Could not run '</span><span class="si">{</span><span class="n">question</span><span class="si">}</span><span class="s2">': </span><span class="si">{</span><span class="n">error</span><span class="si">}</span><span class="s2">"</span><span class="p">)</span>
+    <span class="k">finally</span><span class="p">:</span>
+        <span class="n">disconnect_db</span><span class="p">(</span><span class="n">conn</span><span class="p">)</span></div>
+
+
+
+<span class="k">def</span><span class="w"> </span><span class="nf">_database_url</span><span class="p">():</span>
+<span class="w">    </span><span class="sd">"""</span>
+<span class="sd">    Read the DATABASE_URL environment variable.</span>
+
+<span class="sd">    :raises EnvironmentError: If it isn't set.</span>
+<span class="sd">    :returns: The connection string.</span>
+<span class="sd">    :rtype: str</span>
+<span class="sd">    """</span>
+    <span class="n">database_url</span> <span class="o">=</span> <span class="n">os</span><span class="o">.</span><span class="n">getenv</span><span class="p">(</span><span class="s2">"DATABASE_URL"</span><span class="p">)</span>
+    <span class="k">if</span> <span class="ow">not</span> <span class="n">database_url</span><span class="p">:</span>
+        <span class="k">raise</span> <span class="ne">EnvironmentError</span><span class="p">(</span>
+            <span class="s2">"Set the DATABASE_URL environment variable before running this script."</span>
+        <span class="p">)</span>
+    <span class="k">return</span> <span class="n">database_url</span>
+
+
+<span class="k">if</span> <span class="vm">__name__</span> <span class="o">==</span> <span class="s2">"__main__"</span><span class="p">:</span>
+    <span class="n">analyze</span><span class="p">(</span><span class="n">QUESTION_QUERY</span><span class="p">,</span> <span class="n">_database_url</span><span class="p">())</span>
+</pre></div>
+
+           </div>
+          </div>
+          <footer>
+
+  <hr/>
+
+  <div role="contentinfo">
+    <p>&#169; Copyright 2026, Cameron Ela.</p>
+  </div>
+
+  Built with <a href="https://www.sphinx-doc.org/">Sphinx</a> using a
+    <a href="https://github.com/readthedocs/sphinx_rtd_theme">theme</a>
+    provided by <a href="https://readthedocs.org">Read the Docs</a>.
+   
+
+</footer>
+        </div>
+      </div>
+    </section>
+  </div>
+  <script>
+      jQuery(function () {
+          SphinxRtdTheme.Navigation.enable(true);
+      });
+  </script> 
+
+</body>
+</html>

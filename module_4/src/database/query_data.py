@@ -291,12 +291,19 @@ QUESTION_QUERY = [
 
 def analyze(question_query: list[tuple[str, str, Callable[[list[dict]], str]]], database_url: str):
     """
-    Takes a list of (question, query, format_result) tuples and a
-    DATABASE_URL connection string, runs each query, and prints its
-    answer using format_result. If a query fails, its error is printed in
-    place of an answer and the remaining questions are still attempted
-    instead of stopping the whole analysis.
-    Returns none.
+    Run each (question, query, format_result) tuple's query and print
+    its answer using format_result. If a query fails, its error is
+    printed in place of an answer and the remaining questions are still
+    attempted instead of stopping the whole analysis.
+
+    :param question_query: A list of (question, SQL query, result
+        formatter) tuples.
+    :type question_query: list[tuple(str, str, Callable[[list[dict]], str])]
+    :param database_url: A "postgresql://user:password@host:port/dbname"
+        connection string.
+    :type database_url: str
+    :returns: None.
+    :rtype: None
     """
     if len(question_query) == 0:
         print("No questions or queries submitted")
@@ -320,9 +327,11 @@ def analyze(question_query: list[tuple[str, str, Callable[[list[dict]], str]]], 
 
 def _database_url():
     """
-    Reads the DATABASE_URL environment variable.
-    Returns the connection string.
-    Raises EnvironmentError if it isn't set.
+    Read the DATABASE_URL environment variable.
+
+    :raises EnvironmentError: If it isn't set.
+    :returns: The connection string.
+    :rtype: str
     """
     database_url = os.getenv("DATABASE_URL")
     if not database_url:

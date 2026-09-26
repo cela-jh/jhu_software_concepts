@@ -25,8 +25,12 @@ STATE_DIR = WORK_DIR / ".llm_state"
 
 def _read_jsonl(path):
     """
-    Reads a JSON Lines file.
-    Returns a list of the parsed row dicts.
+    Read a JSON Lines file.
+
+    :param path: Path to the JSON Lines file.
+    :type path: str or pathlib.Path
+    :returns: The parsed row dicts.
+    :rtype: list[dict]
     """
     rows = []
     with open(path) as f:
@@ -39,11 +43,20 @@ def _read_jsonl(path):
 
 def _safe_write_json(rows, output_path):
     """
-    Writes rows to output_path as a pretty-printed JSON array. Refuses to
+    Write rows to output_path as a pretty-printed JSON array. Refuses to
     overwrite an existing, larger result with a smaller or empty one,
     raising instead. Writes via a temp file and an atomic rename, so a
     crash mid-write can never leave a truncated or corrupted file in its
-    place. Returns none.
+    place.
+
+    :param rows: The rows to write.
+    :type rows: list[dict]
+    :param output_path: Path to write the JSON array to.
+    :type output_path: str or pathlib.Path
+    :raises RuntimeError: If output_path already holds more rows than
+        are being written.
+    :returns: None.
+    :rtype: None
     """
     output_path = Path(output_path)
     if output_path.is_file():
@@ -65,8 +78,14 @@ def _safe_write_json(rows, output_path):
 
 def jsonl_to_json(jsonl_path, json_path):
     """
-    Converts a JSON Lines file into a single JSON array file.
-    Returns none.
+    Convert a JSON Lines file into a single JSON array file.
+
+    :param jsonl_path: Path to the source JSON Lines file.
+    :type jsonl_path: str or pathlib.Path
+    :param json_path: Path to write the JSON array file to.
+    :type json_path: str or pathlib.Path
+    :returns: None.
+    :rtype: None
     """
     rows = _read_jsonl(jsonl_path)
     with open(json_path, "w") as f:
@@ -75,11 +94,18 @@ def jsonl_to_json(jsonl_path, json_path):
 
 def _load_completed(output_path, key):
     """
-    Gathers every row already known to be done, keyed by `key`, typically
-    "url". Includes rows already merged into output_path, plus rows sitting
-    in any leftover chunk_*.jsonl file in STATE_DIR from a prior run that
-    crashed or was interrupted before its results were merged. Returns a
-    dict mapping each key value to its row.
+    Gather every row already known to be done, keyed by `key`, typically
+    "url". Includes rows already merged into output_path, plus rows
+    sitting in any leftover chunk_*.jsonl file in STATE_DIR from a
+    prior run that crashed or was interrupted before its results were
+    merged.
+
+    :param output_path: Path to the merged JSON output file.
+    :type output_path: str or pathlib.Path
+    :param key: The row field used as the unique identifier.
+    :type key: str
+    :returns: A dict mapping each key value to its row.
+    :rtype: dict
     """
     completed = {}
 
@@ -106,9 +132,15 @@ def _load_completed(output_path, key):
 
 def _merge_and_write(output_path, key):
     """
-    Recomputes the completed set from output_path and STATE_DIR chunk
-    files, then atomically writes it to output_path. Returns the merged
-    row count.
+    Recompute the completed set from output_path and STATE_DIR chunk
+    files, then atomically write it to output_path.
+
+    :param output_path: Path to the merged JSON output file.
+    :type output_path: str or pathlib.Path
+    :param key: The row field used as the unique identifier.
+    :type key: str
+    :returns: The merged row count.
+    :rtype: int
     """
     completed = _load_completed(output_path, key)
     _safe_write_json(list(completed.values()), output_path)
@@ -117,7 +149,7 @@ def _merge_and_write(output_path, key):
 
 def run_parallel(input_path, output_path, n_workers=4, n_threads=1, key="url"):
     """
-    Reads input_path and standardizes every row not already present by url
+    Read input_path and standardize every row not already present by url
     in output_path or in a leftover chunk_*.jsonl state file. Splits the
     remaining rows across n_workers app.py subprocesses, each writing its
     own chunk_<i>.jsonl in STATE_DIR incrementally.
@@ -139,10 +171,21 @@ def run_parallel(input_path, output_path, n_workers=4, n_threads=1, key="url"):
     with a merged version that is never smaller. STATE_DIR chunk files are
     deleted only after their rows are confirmed merged into output_path.
 
-    Raises FileNotFoundError if input_path does not exist, and ValueError
-    if it does not contain a JSON array of row objects.
-
-    Returns none.
+    :param input_path: Path to the JSON array of rows to standardize.
+    :type input_path: str or pathlib.Path
+    :param output_path: Path to write the merged, standardized JSON output.
+    :type output_path: str or pathlib.Path
+    :param n_workers: Number of parallel worker processes.
+    :type n_workers: int
+    :param n_threads: Threads per worker process.
+    :type n_threads: int
+    :param key: The row field used as the unique identifier for resume/dedup.
+    :type key: str
+    :raises FileNotFoundError: If input_path does not exist.
+    :raises ValueError: If input_path does not contain a JSON array of
+        row objects.
+    :returns: None.
+    :rtype: None
     """
     input_path = Path(input_path)
     if not input_path.is_file():
@@ -249,7 +292,10 @@ def run_parallel(input_path, output_path, n_workers=4, n_threads=1, key="url"):
 
 def parse_args():
     """
-    Parses CLI arguments for running the parallel standardizer directly.
+    Parse CLI arguments for running the parallel standardizer directly.
+
+    :returns: Parsed arguments.
+    :rtype: argparse.Namespace
     """
     import argparse
 

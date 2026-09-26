@@ -2,7 +2,7 @@
 
 Cameron Ela, cela1@jh.edu
 
-> Builds on the module_2 scraper and module_3's database/webapp work, reorganized into a proper `src/GradCafeAnalytics` package. There is no single combined entry point; scraping, loading, querying, and the webpage each run directly from their own file (see [CLI Usage](#3-cli-usage)).
+> Builds on the module_2 scraper and module_3's database/webapp work, reorganized under `src/`. There is no single combined entry point; scraping, loading, querying, and the webpage each run directly from their own file (see [CLI Usage](#3-cli-usage)).
 
 ## Table of Contents
 
@@ -23,10 +23,10 @@ Cameron Ela, cela1@jh.edu
 
 Four files, each independently executable, cover this project's work:
 
-1. `src/GradCafeAnalytics/scraping/scrape.py` - Scrapes publicly posted graduate admissions results from GradCafe (thegradcafe.com/survey) into a JSON file (`data/applicant_data.json`).
-2. `src/GradCafeAnalytics/database/load_data.py` - Loads a results file (`applicant_data.json`, or the LLM-standardized `llm_extend_applicant_data.json`) into a PostgreSQL table called `applicants`.
-3. `src/GradCafeAnalytics/database/query_data.py` - Runs the Part 2 SQL analysis queries against the `applicants` table and prints each answer to the console.
-4. `src/GradCafeAnalytics/run.py` - A Flask app displaying every analysis answer on one webpage, read live through the SQLAlchemy `Applicant` model rather than `query_data.py`'s raw-SQL path. Its Pull Data button runs `scrape.py` in the background to fetch newly submitted entries and load them into PostgreSQL; Update Analysis re-renders the page with current results without starting a scrape.
+1. `src/scraping/scrape.py` - Scrapes publicly posted graduate admissions results from GradCafe (thegradcafe.com/survey) into a JSON file (`data/applicant_data.json`).
+2. `src/database/load_data.py` - Loads a results file (`applicant_data.json`, or the LLM-standardized `llm_extend_applicant_data.json`) into a PostgreSQL table called `applicants`.
+3. `src/database/query_data.py` - Runs the Part 2 SQL analysis queries against the `applicants` table and prints each answer to the console.
+4. `src/run.py` - A Flask app displaying every analysis answer on one webpage, read live through the SQLAlchemy `Applicant` model rather than `query_data.py`'s raw-SQL path. Its Pull Data button runs `scrape.py` in the background to fetch newly submitted entries and load them into PostgreSQL; Update Analysis re-renders the page with current results without starting a scrape.
 
 ### File tree
 
@@ -42,7 +42,7 @@ module_4/
 |-- docs/
 |   |-- source/             : Sphinx project (conf.py, index.rst, autodoc module stubs)
 |   `-- build/               : generated HTML output (`sphinx-build -b html docs/source docs/build`)
-`-- src/GradCafeAnalytics/
+`-- src/
     |-- paths.py           : shared DATA_DIR/STATE_DIR/SCRAPE_SCRIPT locations, resolved from this file
     |-- run.py             : starts the Flask server
     |-- app/               : the Flask presentation layer
@@ -64,7 +64,7 @@ module_4/
     `-- llm_hosting/       : provided local-LLM standardizer, extended (section 8), kept as its own installable tool
 ```
 
-`scrape.py` imports `clean.py` and `storage.py` by name; Python adds a script's own directory to its import path when run directly, and all three live in `scraping/`. Any file that needs a sibling module in another package (`load_data.py` reusing `storage.py`'s `validate_filepath`, `pull_control.py` reusing `load_data.py`, `routes.py` reusing `database`'s modules, or anything needing `paths.py`) inserts `GradCafeAnalytics/` onto its import path at startup, the same technique module_3 used for `module_2_files/`, just repointed at the new layout. `paths.py` centralizes `data/`, `data/.state/`, and `scrape.py`'s own location as constants so no file hardcodes a path to another directory more than once.
+`scrape.py` imports `clean.py` and `storage.py` by name; Python adds a script's own directory to its import path when run directly, and all three live in `scraping/`. Any file that needs a sibling module in another package (`load_data.py` reusing `storage.py`'s `validate_filepath`, `pull_control.py` reusing `load_data.py`, `routes.py` reusing `database`'s modules, or anything needing `paths.py`) inserts `src/` onto its import path at startup, the same technique module_3 used for `module_2_files/`, just repointed at the new layout. `paths.py` centralizes `data/`, `data/.state/`, and `scrape.py`'s own location as constants so no file hardcodes a path to another directory more than once.
 
 ## 2. Setup
 
@@ -92,23 +92,23 @@ Each command below is run on its own from `module_4`; none depend on a shared en
 
 **Scraping:**
 ```
-python src/GradCafeAnalytics/scraping/scrape.py --num_results <N> --chrome_binary "<path to Chrome>" [output.json]
+python src/scraping/scrape.py --num_results <N> --chrome_binary "<path to Chrome>" [output.json]
 ```
 `--num_results` is the cumulative target for the whole crawl, including a resumed run's prior results, not "collect N more." A real Chrome window opens and navigates to GradCafe; if Cloudflare's challenge appears, solve it manually once (the script polls for it to clear rather than waiting on a keypress, so this also works with no terminal attached, as during a Pull Data run). Transient page failures (including Cloudflare 522s) are retried with exponential backoff instead of stopping the run. If interrupted, re-running the same command with the same output file resumes from saved state (`data/.state/`).
 
 **Loading into PostgreSQL:**
 ```
-DATABASE_URL=postgresql://youruser:yourpassword@localhost:5432/yourdb python src/GradCafeAnalytics/database/load_data.py <file.json>
+DATABASE_URL=postgresql://youruser:yourpassword@localhost:5432/yourdb python src/database/load_data.py <file.json>
 ```
 Validates every result, skips and reports any missing required fields, and upserts the rest (see [section 6](#6-loading-into-postgresql) for details). Prints a summary of loaded/updated/skipped counts at the end, and exits with a non-zero status if the file couldn't be read or the database couldn't be reached at all, so a calling script or CI step can tell an unsuccessful load apart from a completed one.
 
-**Running the Part 2 SQL analysis:** `DATABASE_URL=postgresql://youruser:yourpassword@localhost:5432/yourdb python src/GradCafeAnalytics/database/query_data.py`
+**Running the Part 2 SQL analysis:** `DATABASE_URL=postgresql://youruser:yourpassword@localhost:5432/yourdb python src/database/query_data.py`
 
-**Running the Part 6 SQLAlchemy ORM analysis:** `DATABASE_URL=postgresql://youruser:yourpassword@localhost:5432/yourdb python src/GradCafeAnalytics/database/orm_queries.py`
+**Running the Part 6 SQLAlchemy ORM analysis:** `DATABASE_URL=postgresql://youruser:yourpassword@localhost:5432/yourdb python src/database/orm_queries.py`
 
 **Running the analysis webpage:**
 ```
-DATABASE_URL=postgresql://youruser:yourpassword@localhost:5432/yourdb CHROME_BINARY="<path to Chrome>" python src/GradCafeAnalytics/run.py [--file path/to/results.json]
+DATABASE_URL=postgresql://youruser:yourpassword@localhost:5432/yourdb CHROME_BINARY="<path to Chrome>" python src/run.py [--file path/to/results.json]
 ```
 Open http://127.0.0.1:5000/analysis. Every answer is read live from PostgreSQL through the `Applicant` model on each page load; if PostgreSQL itself is unreachable, the page shows a plain "database is currently unavailable" message (HTTP 503) rather than crashing. `CHROME_BINARY` is only needed for Pull Data. `--file` is optional and defaults to `data/applicant_data.json`; when set, both Pull Data (what it writes to and loads from) and Update Analysis (what it re-syncs) use that file instead - for example, pointing at `data/llm_extend_applicant_data.json` to keep the LLM-standardized fields flowing through Update Analysis.
 
@@ -282,7 +282,7 @@ rows = session.execute(
 Adds `llm-generated-program` / `llm-generated-university` to every row via a self-hosted TinyLlama model, leaving the original `program` field intact. From `module_4`:
 
 ```
-cd src/GradCafeAnalytics/llm_hosting && pip install -r requirements.txt
+cd src/llm_hosting && pip install -r requirements.txt
 python app.py --file ../../../data/applicant_data.json --out ../../../data/llm_extend_applicant_data.json --parallel --n_workers 10 --n_threads 1
 ```
 
@@ -349,7 +349,7 @@ Every test is marked with exactly one of `web`, `buttons`, `analysis`, `db`, or 
 
 ### Notes on test design
 
-- `llm_hosting/app.py` and `llm_hosting/llm_helper.py` are loaded via `importlib` under names other than `app` (e.g. `llm_app`), since a bare `import app` would resolve to the already-imported Flask `app` package from `src/GradCafeAnalytics/app/` instead (whichever module claims the name `app` in `sys.modules` first wins, for the rest of the process). `llm_helper.run_parallel()`'s own lazy `from app import _get_model_path` is satisfied in tests by temporarily inserting a fake module into `sys.modules["app"]`.
+- `llm_hosting/app.py` and `llm_hosting/llm_helper.py` are loaded via `importlib` under names other than `app` (e.g. `llm_app`), since a bare `import app` would resolve to the already-imported Flask `app` package from `src/app/` instead (whichever module claims the name `app` in `sys.modules` first wins, for the rest of the process). `llm_helper.run_parallel()`'s own lazy `from app import _get_model_path` is satisfied in tests by temporarily inserting a fake module into `sys.modules["app"]`.
 - Database tests use a real local PostgreSQL connection (`cam_db_test`), not a mocked one, so schema/constraint behavior (`NOT NULL`, `UNIQUE`, upsert-on-conflict) is verified for real rather than assumed.
 - Selenium, subprocess, and `urllib` calls in `scraping/scrape.py` are mocked at the point of use in every test; no test here ever launches a real Chrome instance or makes a real HTTP request.
 - The Pull Data and Update Analysis buttons carry `data-testid="pull-data-btn"` / `data-testid="update-analysis-btn"` attributes (alongside the `id` attributes the page's own JS uses), so UI tests have a stable selector that doesn't break if the visible button text or styling changes.

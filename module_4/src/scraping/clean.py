@@ -20,9 +20,13 @@ TAGS_REGEX_DICT = {
 
 def _group_rows(results):
     """
-    Groups main data values with accompanying tags and comments. Rows with tags 
-    or comments have class="tw-border-none".
-    Returns list of grouped rows.
+    Group main data values with accompanying tags and comments. Rows
+    with tags or comments have class="tw-border-none".
+
+    :param results: The raw `<tr>` rows scraped from a results page.
+    :type results: list[bs4.Tag]
+    :returns: A list of (main_row, extra_rows) tuples.
+    :rtype: list[tuple(bs4.Tag, list[bs4.Tag])]
     """
     groups = []
     i = 0
@@ -45,8 +49,15 @@ def _group_rows(results):
 
 def _get_tag(tag, text):
     """
-    Uses regex to find a tag.
-    Returns tag if it exists, else None.
+    Use regex to find a tag.
+
+    :param tag: The key into TAGS_REGEX_DICT identifying which pattern
+        to use.
+    :type tag: str
+    :param text: The text to search.
+    :type text: str
+    :returns: The matched tag text, or None if it doesn't exist.
+    :rtype: str or None
     """
     tag_regex = TAGS_REGEX_DICT[tag]
     match = re.search(tag_regex, text)
@@ -58,9 +69,16 @@ def _get_tag(tag, text):
 
 def _parse_main_row(main_row, url):
     """
-    Parses the main row to get school, program, date added, status, 
+    Parse the main row to get school, program, date added, status,
     status date, and url.
-    Returns a dictionary with these values.
+
+    :param main_row: The main `<tr>` row for a single result.
+    :type main_row: bs4.Tag
+    :param url: The results page URL, used to resolve the result's
+        relative link into an absolute one.
+    :type url: str
+    :returns: A dictionary with these values.
+    :rtype: dict
     """
     cells = main_row.find_all("td")
 
@@ -103,8 +121,12 @@ def _parse_main_row(main_row, url):
 
 def _parse_tags_row(tags_row):
     """
-    Used for parsing the subsequent tags row's cells. Not for use with main row.
-    Returns a dictionary of any tags found.
+    Parse the subsequent tags row's cells. Not for use with main row.
+
+    :param tags_row: The tags `<tr>` row grouped with a main row.
+    :type tags_row: bs4.Tag
+    :returns: A dictionary of any tags found.
+    :rtype: dict
     """
     wrapper = tags_row.find("div")
     all_cells = wrapper.find_all("div", recursive=False)
@@ -135,8 +157,13 @@ def _parse_tags_row(tags_row):
 
 def _parse_sub_rows(extra_rows):
     """
-    Parses the tags and comments rows grouped with a main row.
-    Returns a combined dictionary of tags and comment data.
+    Parse the tags and comments rows grouped with a main row.
+
+    :param extra_rows: The tags row, and optionally a comments row,
+        grouped with one main row.
+    :type extra_rows: list[bs4.Tag]
+    :returns: A combined dictionary of tags and comment data.
+    :rtype: dict
     """
     sub_rows_parsed = dict()
     tags_row_parsed = _parse_tags_row(extra_rows[0])
@@ -152,8 +179,12 @@ def _parse_sub_rows(extra_rows):
 
 def _order_keys(parsed_results):
     """
-    Orders keys for preferred output.
-    Returns dictionary with custom ordered keys.
+    Order keys for preferred output.
+
+    :param parsed_results: A single result's parsed fields.
+    :type parsed_results: dict
+    :returns: The same fields with a custom key order.
+    :rtype: dict
     """
     keys = parsed_results.keys()
     order = [
@@ -173,8 +204,15 @@ def _order_keys(parsed_results):
 
 def _parse_groups(grouped_results, url):
     """
-    Parses the list of grouped admissions.
-    Returns a list of readable dictionaries.
+    Parse the list of grouped admissions.
+
+    :param grouped_results: (main_row, extra_rows) tuples from _group_rows.
+    :type grouped_results: list[tuple(bs4.Tag, list[bs4.Tag])]
+    :param url: The results page URL, used to resolve each result's
+        relative link into an absolute one.
+    :type url: str
+    :returns: A list of readable dictionaries.
+    :rtype: list[dict]
     """
     parsed_results = []
     for group in grouped_results:
@@ -196,9 +234,17 @@ def _parse_groups(grouped_results, url):
 
 def clean_data(results: list, url):
     """
-    Cleans raw html the list of admissions results into readable dictionaries.
-    Returns a list of dictionaries, each containing relevant information about 
-    a single result.
+    Clean the raw html list of admissions results into readable
+    dictionaries.
+
+    :param results: The raw `<tr>` rows scraped from a results page.
+    :type results: list[bs4.Tag]
+    :param url: The results page URL, used to resolve each result's
+        relative link into an absolute one.
+    :type url: str
+    :returns: A list of dictionaries, each containing relevant
+        information about a single result.
+    :rtype: list[dict]
     """
     groups = _group_rows(results)
     parsed_results = _parse_groups(groups, url)

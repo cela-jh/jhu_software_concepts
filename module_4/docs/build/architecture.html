@@ -1,0 +1,207 @@
+
+
+<!DOCTYPE html>
+<html class="writer-html5" lang="en" data-content_root="./">
+<head>
+  <meta charset="utf-8" /><meta name="viewport" content="width=device-width, initial-scale=1" />
+
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Architecture &mdash; GradCafe Analytics 1.0 documentation</title>
+      <link rel="stylesheet" type="text/css" href="_static/pygments.css?v=b86133f3" />
+      <link rel="stylesheet" type="text/css" href="_static/css/theme.css?v=9edc463e" />
+
+  
+      <script src="_static/jquery.js?v=5d32c60e"></script>
+      <script src="_static/_sphinx_javascript_frameworks_compat.js?v=2cd50e6c"></script>
+      <script src="_static/documentation_options.js?v=f2a433a1"></script>
+      <script src="_static/doctools.js?v=fd6eb6e6"></script>
+      <script src="_static/sphinx_highlight.js?v=6ffebe34"></script>
+    <script src="_static/js/theme.js"></script>
+    <link rel="index" title="Index" href="genindex.html" />
+    <link rel="search" title="Search" href="search.html" />
+    <link rel="next" title="API Reference" href="modules/modules.html" />
+    <link rel="prev" title="Overview &amp; Setup" href="overview_setup.html" /> 
+</head>
+
+<body class="wy-body-for-nav"> 
+  <div class="wy-grid-for-nav">
+    <nav data-toggle="wy-nav-shift" class="wy-nav-side">
+      <div class="wy-side-scroll">
+        <div class="wy-side-nav-search" >
+
+          
+          
+          <a href="index.html" class="icon icon-home">
+            GradCafe Analytics
+          </a>
+<div role="search">
+  <form id="rtd-search-form" class="wy-form" action="search.html" method="get">
+    <input type="text" name="q" placeholder="Search docs" aria-label="Search docs" />
+    <input type="hidden" name="check_keywords" value="yes" />
+    <input type="hidden" name="area" value="default" />
+  </form>
+</div>
+        </div><div class="wy-menu wy-menu-vertical" data-spy="affix" role="navigation" aria-label="Navigation menu">
+              <p class="caption" role="heading"><span class="caption-text">Contents:</span></p>
+<ul class="current">
+<li class="toctree-l1"><a class="reference internal" href="overview_setup.html">Overview &amp; Setup</a></li>
+<li class="toctree-l1 current"><a class="current reference internal" href="#">Architecture</a><ul>
+<li class="toctree-l2"><a class="reference internal" href="#web-layer-src-app-src-run-py">Web layer (<code class="docutils literal notranslate"><span class="pre">src/app/</span></code>, <code class="docutils literal notranslate"><span class="pre">src/run.py</span></code>)</a></li>
+<li class="toctree-l2"><a class="reference internal" href="#etl-layer-src-scraping">ETL layer (<code class="docutils literal notranslate"><span class="pre">src/scraping/</span></code>)</a></li>
+<li class="toctree-l2"><a class="reference internal" href="#db-layer-src-database">DB layer (<code class="docutils literal notranslate"><span class="pre">src/database/</span></code>)</a></li>
+<li class="toctree-l2"><a class="reference internal" href="#llm-standardizer-src-llm-hosting">LLM standardizer (<code class="docutils literal notranslate"><span class="pre">src/llm_hosting/</span></code>)</a></li>
+<li class="toctree-l2"><a class="reference internal" href="#data-flow">Data flow</a></li>
+</ul>
+</li>
+<li class="toctree-l1"><a class="reference internal" href="modules/modules.html">API Reference</a></li>
+<li class="toctree-l1"><a class="reference internal" href="testing_guide.html">Testing Guide</a></li>
+</ul>
+
+        </div>
+      </div>
+    </nav>
+
+    <section data-toggle="wy-nav-shift" class="wy-nav-content-wrap"><nav class="wy-nav-top" aria-label="Mobile navigation menu" >
+          <i data-toggle="wy-nav-top" class="fa fa-bars"></i>
+          <a href="index.html">GradCafe Analytics</a>
+      </nav>
+
+      <div class="wy-nav-content">
+        <div class="rst-content">
+          <div role="navigation" aria-label="Page navigation">
+  <ul class="wy-breadcrumbs">
+      <li><a href="index.html" class="icon icon-home" aria-label="Home"></a></li>
+      <li class="breadcrumb-item active">Architecture</li>
+      <li class="wy-breadcrumbs-aside">
+            <a href="_sources/architecture.rst.txt" rel="nofollow"> View page source</a>
+      </li>
+  </ul>
+  <hr/>
+</div>
+          <div role="main" class="document" itemscope="itemscope" itemtype="http://schema.org/Article">
+           <div itemprop="articleBody">
+             
+  <section id="architecture">
+<h1>Architecture<a class="headerlink" href="#architecture" title="Link to this heading"></a></h1>
+<p>The project is organized into three layers, plus a standalone tool. Each
+file is independently executable and there is no single combined entry
+point; <code class="docutils literal notranslate"><span class="pre">paths.py</span></code> centralizes shared filesystem locations so no file
+hardcodes a path to another directory more than once.</p>
+<section id="web-layer-src-app-src-run-py">
+<h2>Web layer (<code class="docutils literal notranslate"><span class="pre">src/app/</span></code>, <code class="docutils literal notranslate"><span class="pre">src/run.py</span></code>)<a class="headerlink" href="#web-layer-src-app-src-run-py" title="Link to this heading"></a></h2>
+<p>The Flask presentation layer. <code class="docutils literal notranslate"><span class="pre">run.py</span></code> is the CLI entry point that
+starts the server; <code class="docutils literal notranslate"><span class="pre">app/__init__.py</span></code> builds the Flask app via
+<code class="docutils literal notranslate"><span class="pre">create_app()</span></code> and registers its routes.</p>
+<ul class="simple">
+<li><p><code class="docutils literal notranslate"><span class="pre">app/routes.py</span></code> defines the <code class="docutils literal notranslate"><span class="pre">/analysis</span></code> page (renders every Part 2
+answer, read live through the SQLAlchemy ORM) and the JSON endpoints
+behind the Pull Data / Update Analysis buttons (<code class="docutils literal notranslate"><span class="pre">/pull-data</span></code>,
+<code class="docutils literal notranslate"><span class="pre">/pull/cancel</span></code>, <code class="docutils literal notranslate"><span class="pre">/pull/status</span></code>, <code class="docutils literal notranslate"><span class="pre">/update-analysis</span></code>).</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">app/pull_control.py</span></code> tracks and controls the background scrape
+subprocess started by Pull Data: streaming its output, handling
+cancellation, and triggering the database upload once it exits.</p></li>
+</ul>
+<p>The web layer’s only responsibility is presenting data and coordinating
+a pull; it never parses HTML or writes SQL directly, delegating both to
+the ETL and DB layers below.</p>
+</section>
+<section id="etl-layer-src-scraping">
+<h2>ETL layer (<code class="docutils literal notranslate"><span class="pre">src/scraping/</span></code>)<a class="headerlink" href="#etl-layer-src-scraping" title="Link to this heading"></a></h2>
+<p>Extracts and transforms admissions results from GradCafe into structured
+JSON, independent of the database.</p>
+<ul class="simple">
+<li><p><code class="docutils literal notranslate"><span class="pre">scrape.py</span></code> drives a real Chrome browser via Selenium (routed around
+Cloudflare’s bot check), paginates through results, and hands raw HTML
+rows to <code class="docutils literal notranslate"><span class="pre">clean.py</span></code>.</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">clean.py</span></code> parses those raw rows into structured dictionaries
+(program, university, status, term, scores, etc.), with no I/O of its
+own.</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">storage.py</span></code> persists parsed results to JSON incrementally and
+tracks resumable-crawl state, so an interrupted scrape can continue
+from where it left off.</p></li>
+</ul>
+<p>This layer’s output is a plain JSON file; it never opens a database
+connection.</p>
+</section>
+<section id="db-layer-src-database">
+<h2>DB layer (<code class="docutils literal notranslate"><span class="pre">src/database/</span></code>)<a class="headerlink" href="#db-layer-src-database" title="Link to this heading"></a></h2>
+<p>Everything that talks to the <code class="docutils literal notranslate"><span class="pre">applicants</span></code> table.</p>
+<ul class="simple">
+<li><p><code class="docutils literal notranslate"><span class="pre">db_helpers.py</span></code> provides raw psycopg connect/disconnect helpers and
+a SQL pretty-printer.</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">models.py</span></code> defines the SQLAlchemy <code class="docutils literal notranslate"><span class="pre">Applicant</span></code> model and the
+engine/session used by the ORM query path.</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">load_data.py</span></code> validates a results file’s rows and upserts them into
+PostgreSQL, clearing implausible scores and normalizing nationality
+values already in the table.</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">query_data.py</span></code> answers the Part 2 questions with raw SQL.</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">orm_queries.py</span></code> answers a subset of the same questions with the
+SQLAlchemy ORM instead, used live by the Flask analysis page.</p></li>
+</ul>
+<p>This layer owns every SQL statement and schema assumption in the
+project; the web and ETL layers never construct SQL themselves.</p>
+</section>
+<section id="llm-standardizer-src-llm-hosting">
+<h2>LLM standardizer (<code class="docutils literal notranslate"><span class="pre">src/llm_hosting/</span></code>)<a class="headerlink" href="#llm-standardizer-src-llm-hosting" title="Link to this heading"></a></h2>
+<p>A self-contained tool, kept independently installable from the rest of
+the project (its own <code class="docutils literal notranslate"><span class="pre">requirements.txt</span></code>). Adds
+<code class="docutils literal notranslate"><span class="pre">llm-generated-program</span></code> / <code class="docutils literal notranslate"><span class="pre">llm-generated-university</span></code> fields to a
+results file via a self-hosted TinyLlama model, either as a Flask
+service (<code class="docutils literal notranslate"><span class="pre">app.py</span></code>) or a CLI, with <code class="docutils literal notranslate"><span class="pre">llm_helper.py</span></code> providing
+crash-safe parallelization across multiple worker processes. It is
+never called automatically by the web or ETL layers; running it is a
+separate, optional step before loading a file.</p>
+</section>
+<section id="data-flow">
+<h2>Data flow<a class="headerlink" href="#data-flow" title="Link to this heading"></a></h2>
+<div class="highlight-text notranslate"><div class="highlight"><pre><span></span>scrape.py --&gt; (raw HTML rows) --&gt; clean.py --&gt; (JSON) --&gt; storage.py
+                                                               |
+                                                               v
+                                                   applicant_data.json
+                                                               |
+                                     (optional: llm_hosting) --+--&gt; llm_extend_applicant_data.json
+                                                               |
+                                                               v
+                                                       load_data.py --&gt; PostgreSQL (applicants)
+                                                                             |
+                                                           query_data.py / orm_queries.py
+                                                                             |
+                                                                             v
+                                                                 run.py (Flask /analysis page)
+</pre></div>
+</div>
+</section>
+</section>
+
+
+           </div>
+          </div>
+          <footer><div class="rst-footer-buttons" role="navigation" aria-label="Footer">
+        <a href="overview_setup.html" class="btn btn-neutral float-left" title="Overview &amp; Setup" accesskey="p" rel="prev"><span class="fa fa-arrow-circle-left" aria-hidden="true"></span> Previous</a>
+        <a href="modules/modules.html" class="btn btn-neutral float-right" title="API Reference" accesskey="n" rel="next">Next <span class="fa fa-arrow-circle-right" aria-hidden="true"></span></a>
+    </div>
+
+  <hr/>
+
+  <div role="contentinfo">
+    <p>&#169; Copyright 2026, Cameron Ela.</p>
+  </div>
+
+  Built with <a href="https://www.sphinx-doc.org/">Sphinx</a> using a
+    <a href="https://github.com/readthedocs/sphinx_rtd_theme">theme</a>
+    provided by <a href="https://readthedocs.org">Read the Docs</a>.
+   
+
+</footer>
+        </div>
+      </div>
+    </section>
+  </div>
+  <script>
+      jQuery(function () {
+          SphinxRtdTheme.Navigation.enable(true);
+      });
+  </script> 
+
+</body>
+</html>

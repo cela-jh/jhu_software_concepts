@@ -44,9 +44,13 @@ _SQL_KEYWORD_PATTERN = re.compile(
 
 def connect_db(database_url: str):
     """
-    Connects to the PostgreSQL database described by database_url (a
-    "postgresql://user:password@host:port/dbname" connection string).
-    Returns the open connection, or None if the connection failed.
+    Connect to the PostgreSQL database described by database_url.
+
+    :param database_url: A "postgresql://user:password@host:port/dbname"
+        connection string.
+    :type database_url: str
+    :returns: The open connection, or None if the connection failed.
+    :rtype: psycopg.Connection or None
     """
     try:
         return psycopg.connect(database_url)
@@ -59,8 +63,12 @@ def connect_db(database_url: str):
 
 def disconnect_db(conn):
     """
-    Closes a database connection opened by connect_db.
-    Returns none.
+    Close a database connection opened by connect_db.
+
+    :param conn: The connection to close, or None.
+    :type conn: psycopg.Connection or None
+    :returns: None.
+    :rtype: None
     """
     if conn is not None:
         conn.close()
@@ -68,8 +76,14 @@ def disconnect_db(conn):
 
 def get_applicant(conn, p_id):
     """
-    Queries a single row from the applicants table by its primary key.
-    Returns a dict keyed by column name, or None if no row has that p_id.
+    Query a single row from the applicants table by its primary key.
+
+    :param conn: An open database connection.
+    :type conn: psycopg.Connection
+    :param p_id: The applicant's primary key.
+    :type p_id: int
+    :returns: A dict keyed by column name, or None if no row has that p_id.
+    :rtype: dict or None
     """
     with conn.cursor(row_factory=dict_row) as cursor:
         cursor.execute("SELECT * FROM applicants WHERE p_id = %s", (p_id,))
@@ -78,10 +92,14 @@ def get_applicant(conn, p_id):
 
 def pretty_print_query(query):
     """
-    Formats a SQL query so each clause or special keyword (SELECT, FROM,
+    Format a SQL query so each clause or special keyword (SELECT, FROM,
     WHERE, GROUP BY, AND, etc.) starts its own line and is written in
     uppercase.
-    Returns the formatted query string.
+
+    :param query: The SQL query to format.
+    :type query: str
+    :returns: The formatted query string.
+    :rtype: str
     """
     formatted = _SQL_KEYWORD_PATTERN.sub(lambda m: "\n" + m.group(0).upper(), query)
     lines = [line.strip() for line in formatted.splitlines() if line.strip()]

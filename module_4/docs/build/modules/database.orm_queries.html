@@ -1,0 +1,349 @@
+
+
+<!DOCTYPE html>
+<html class="writer-html5" lang="en" data-content_root="../">
+<head>
+  <meta charset="utf-8" /><meta name="viewport" content="width=device-width, initial-scale=1" />
+
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>database.orm_queries module &mdash; GradCafe Analytics 1.0 documentation</title>
+      <link rel="stylesheet" type="text/css" href="../_static/pygments.css?v=b86133f3" />
+      <link rel="stylesheet" type="text/css" href="../_static/css/theme.css?v=9edc463e" />
+
+  
+      <script src="../_static/jquery.js?v=5d32c60e"></script>
+      <script src="../_static/_sphinx_javascript_frameworks_compat.js?v=2cd50e6c"></script>
+      <script src="../_static/documentation_options.js?v=f2a433a1"></script>
+      <script src="../_static/doctools.js?v=fd6eb6e6"></script>
+      <script src="../_static/sphinx_highlight.js?v=6ffebe34"></script>
+    <script src="../_static/js/theme.js"></script>
+    <link rel="index" title="Index" href="../genindex.html" />
+    <link rel="search" title="Search" href="../search.html" />
+    <link rel="next" title="database.query_data module" href="database.query_data.html" />
+    <link rel="prev" title="database.models module" href="database.models.html" /> 
+</head>
+
+<body class="wy-body-for-nav"> 
+  <div class="wy-grid-for-nav">
+    <nav data-toggle="wy-nav-shift" class="wy-nav-side">
+      <div class="wy-side-scroll">
+        <div class="wy-side-nav-search" >
+
+          
+          
+          <a href="../index.html" class="icon icon-home">
+            GradCafe Analytics
+          </a>
+<div role="search">
+  <form id="rtd-search-form" class="wy-form" action="../search.html" method="get">
+    <input type="text" name="q" placeholder="Search docs" aria-label="Search docs" />
+    <input type="hidden" name="check_keywords" value="yes" />
+    <input type="hidden" name="area" value="default" />
+  </form>
+</div>
+        </div><div class="wy-menu wy-menu-vertical" data-spy="affix" role="navigation" aria-label="Navigation menu">
+              <p class="caption" role="heading"><span class="caption-text">Contents:</span></p>
+<ul class="current">
+<li class="toctree-l1"><a class="reference internal" href="../overview_setup.html">Overview &amp; Setup</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../architecture.html">Architecture</a></li>
+<li class="toctree-l1 current"><a class="reference internal" href="modules.html">API Reference</a><ul class="current">
+<li class="toctree-l2"><a class="reference internal" href="app.html">app package</a></li>
+<li class="toctree-l2 current"><a class="reference internal" href="database.html">database package</a><ul class="current">
+<li class="toctree-l3 current"><a class="reference internal" href="database.html#submodules">Submodules</a><ul class="current">
+<li class="toctree-l4"><a class="reference internal" href="database.db_helpers.html">database.db_helpers module</a></li>
+<li class="toctree-l4"><a class="reference internal" href="database.load_data.html">database.load_data module</a></li>
+<li class="toctree-l4"><a class="reference internal" href="database.models.html">database.models module</a></li>
+<li class="toctree-l4 current"><a class="current reference internal" href="#">database.orm_queries module</a></li>
+<li class="toctree-l4"><a class="reference internal" href="database.query_data.html">database.query_data module</a></li>
+</ul>
+</li>
+<li class="toctree-l3"><a class="reference internal" href="database.html#module-database">Module contents</a></li>
+</ul>
+</li>
+<li class="toctree-l2"><a class="reference internal" href="llm_hosting.html">llm_hosting package</a></li>
+<li class="toctree-l2"><a class="reference internal" href="paths.html">paths module</a></li>
+<li class="toctree-l2"><a class="reference internal" href="run.html">run module</a></li>
+<li class="toctree-l2"><a class="reference internal" href="scraping.html">scraping package</a></li>
+</ul>
+</li>
+<li class="toctree-l1"><a class="reference internal" href="../testing_guide.html">Testing Guide</a></li>
+</ul>
+
+        </div>
+      </div>
+    </nav>
+
+    <section data-toggle="wy-nav-shift" class="wy-nav-content-wrap"><nav class="wy-nav-top" aria-label="Mobile navigation menu" >
+          <i data-toggle="wy-nav-top" class="fa fa-bars"></i>
+          <a href="../index.html">GradCafe Analytics</a>
+      </nav>
+
+      <div class="wy-nav-content">
+        <div class="rst-content">
+          <div role="navigation" aria-label="Page navigation">
+  <ul class="wy-breadcrumbs">
+      <li><a href="../index.html" class="icon icon-home" aria-label="Home"></a></li>
+          <li class="breadcrumb-item"><a href="modules.html">API Reference</a></li>
+          <li class="breadcrumb-item"><a href="database.html">database package</a></li>
+      <li class="breadcrumb-item active">database.orm_queries module</li>
+      <li class="wy-breadcrumbs-aside">
+            <a href="../_sources/modules/database.orm_queries.rst.txt" rel="nofollow"> View page source</a>
+      </li>
+  </ul>
+  <hr/>
+</div>
+          <div role="main" class="document" itemscope="itemscope" itemtype="http://schema.org/Article">
+           <div itemprop="articleBody">
+             
+  <section id="module-database.orm_queries">
+<span id="database-orm-queries-module"></span><h1>database.orm_queries module<a class="headerlink" href="#module-database.orm_queries" title="Link to this heading"></a></h1>
+<p><cite>orm_queries.py</cite>
+Repeats a subset of the Part 2 SQL analysis using the SQLAlchemy ORM
+instead of handwritten SQL. Run directly (<cite>python orm_queries.py</cite>, with
+PGUSER/PGPASSWORD set) to print every answer.</p>
+<dl class="py function">
+<dt class="sig sig-object py" id="database.orm_queries.orm_a1">
+<span class="sig-prename descclassname"><span class="pre">database.orm_queries.</span></span><span class="sig-name descname"><span class="pre">orm_a1</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">session</span></span></em><span class="sig-paren">)</span><a class="reference internal" href="../_modules/database/orm_queries.html#orm_a1"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#database.orm_queries.orm_a1" title="Link to this definition"></a></dt>
+<dd><p>What percentage of total acceptances come from each term found in
+the data?</p>
+<dl class="field-list simple">
+<dt class="field-odd">Parameters<span class="colon">:</span></dt>
+<dd class="field-odd"><p><strong>session</strong> (<em>sqlalchemy.orm.Session</em>) – Active SQLAlchemy session.</p>
+</dd>
+<dt class="field-even">Returns<span class="colon">:</span></dt>
+<dd class="field-even"><p>The formatted answer.</p>
+</dd>
+<dt class="field-odd">Return type<span class="colon">:</span></dt>
+<dd class="field-odd"><p>str</p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py function">
+<dt class="sig sig-object py" id="database.orm_queries.orm_a2">
+<span class="sig-prename descclassname"><span class="pre">database.orm_queries.</span></span><span class="sig-name descname"><span class="pre">orm_a2</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">session</span></span></em><span class="sig-paren">)</span><a class="reference internal" href="../_modules/database/orm_queries.html#orm_a2"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#database.orm_queries.orm_a2" title="Link to this definition"></a></dt>
+<dd><p>Average GPA for USC applicants who were accepted versus not, and
+the difference.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Parameters<span class="colon">:</span></dt>
+<dd class="field-odd"><p><strong>session</strong> (<em>sqlalchemy.orm.Session</em>) – Active SQLAlchemy session.</p>
+</dd>
+<dt class="field-even">Returns<span class="colon">:</span></dt>
+<dd class="field-even"><p>The formatted answer.</p>
+</dd>
+<dt class="field-odd">Return type<span class="colon">:</span></dt>
+<dd class="field-odd"><p>str</p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py function">
+<dt class="sig sig-object py" id="database.orm_queries.orm_q1">
+<span class="sig-prename descclassname"><span class="pre">database.orm_queries.</span></span><span class="sig-name descname"><span class="pre">orm_q1</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">session</span></span></em><span class="sig-paren">)</span><a class="reference internal" href="../_modules/database/orm_queries.html#orm_q1"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#database.orm_queries.orm_q1" title="Link to this definition"></a></dt>
+<dd><p>How many entries are from applicants who applied for Fall 2026?</p>
+<dl class="field-list simple">
+<dt class="field-odd">Parameters<span class="colon">:</span></dt>
+<dd class="field-odd"><p><strong>session</strong> (<em>sqlalchemy.orm.Session</em>) – Active SQLAlchemy session.</p>
+</dd>
+<dt class="field-even">Returns<span class="colon">:</span></dt>
+<dd class="field-even"><p>The formatted answer.</p>
+</dd>
+<dt class="field-odd">Return type<span class="colon">:</span></dt>
+<dd class="field-odd"><p>str</p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py function">
+<dt class="sig sig-object py" id="database.orm_queries.orm_q2">
+<span class="sig-prename descclassname"><span class="pre">database.orm_queries.</span></span><span class="sig-name descname"><span class="pre">orm_q2</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">session</span></span></em><span class="sig-paren">)</span><a class="reference internal" href="../_modules/database/orm_queries.html#orm_q2"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#database.orm_queries.orm_q2" title="Link to this definition"></a></dt>
+<dd><p>Percentage of entries with a usable nationality classification that
+are international.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Parameters<span class="colon">:</span></dt>
+<dd class="field-odd"><p><strong>session</strong> (<em>sqlalchemy.orm.Session</em>) – Active SQLAlchemy session.</p>
+</dd>
+<dt class="field-even">Returns<span class="colon">:</span></dt>
+<dd class="field-even"><p>The formatted answer.</p>
+</dd>
+<dt class="field-odd">Return type<span class="colon">:</span></dt>
+<dd class="field-odd"><p>str</p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py function">
+<dt class="sig sig-object py" id="database.orm_queries.orm_q3">
+<span class="sig-prename descclassname"><span class="pre">database.orm_queries.</span></span><span class="sig-name descname"><span class="pre">orm_q3</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">session</span></span></em><span class="sig-paren">)</span><a class="reference internal" href="../_modules/database/orm_queries.html#orm_q3"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#database.orm_queries.orm_q3" title="Link to this definition"></a></dt>
+<dd><p>Average GPA, GRE Quantitative, GRE Verbal, and GRE Analytical
+Writing scores.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Parameters<span class="colon">:</span></dt>
+<dd class="field-odd"><p><strong>session</strong> (<em>sqlalchemy.orm.Session</em>) – Active SQLAlchemy session.</p>
+</dd>
+<dt class="field-even">Returns<span class="colon">:</span></dt>
+<dd class="field-even"><p>The formatted answer.</p>
+</dd>
+<dt class="field-odd">Return type<span class="colon">:</span></dt>
+<dd class="field-odd"><p>str</p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py function">
+<dt class="sig sig-object py" id="database.orm_queries.orm_q4">
+<span class="sig-prename descclassname"><span class="pre">database.orm_queries.</span></span><span class="sig-name descname"><span class="pre">orm_q4</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">session</span></span></em><span class="sig-paren">)</span><a class="reference internal" href="../_modules/database/orm_queries.html#orm_q4"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#database.orm_queries.orm_q4" title="Link to this definition"></a></dt>
+<dd><p>Average GPA of American applicants who applied for Fall 2026.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Parameters<span class="colon">:</span></dt>
+<dd class="field-odd"><p><strong>session</strong> (<em>sqlalchemy.orm.Session</em>) – Active SQLAlchemy session.</p>
+</dd>
+<dt class="field-even">Returns<span class="colon">:</span></dt>
+<dd class="field-even"><p>The formatted answer.</p>
+</dd>
+<dt class="field-odd">Return type<span class="colon">:</span></dt>
+<dd class="field-odd"><p>str</p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py function">
+<dt class="sig sig-object py" id="database.orm_queries.orm_q5">
+<span class="sig-prename descclassname"><span class="pre">database.orm_queries.</span></span><span class="sig-name descname"><span class="pre">orm_q5</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">session</span></span></em><span class="sig-paren">)</span><a class="reference internal" href="../_modules/database/orm_queries.html#orm_q5"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#database.orm_queries.orm_q5" title="Link to this definition"></a></dt>
+<dd><p>Percentage of Fall 2025 entries that are acceptances.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Parameters<span class="colon">:</span></dt>
+<dd class="field-odd"><p><strong>session</strong> (<em>sqlalchemy.orm.Session</em>) – Active SQLAlchemy session.</p>
+</dd>
+<dt class="field-even">Returns<span class="colon">:</span></dt>
+<dd class="field-even"><p>The formatted answer.</p>
+</dd>
+<dt class="field-odd">Return type<span class="colon">:</span></dt>
+<dd class="field-odd"><p>str</p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py function">
+<dt class="sig sig-object py" id="database.orm_queries.orm_q6">
+<span class="sig-prename descclassname"><span class="pre">database.orm_queries.</span></span><span class="sig-name descname"><span class="pre">orm_q6</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">session</span></span></em><span class="sig-paren">)</span><a class="reference internal" href="../_modules/database/orm_queries.html#orm_q6"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#database.orm_queries.orm_q6" title="Link to this definition"></a></dt>
+<dd><p>Average GPA of accepted applicants who applied for Fall 2026.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Parameters<span class="colon">:</span></dt>
+<dd class="field-odd"><p><strong>session</strong> (<em>sqlalchemy.orm.Session</em>) – Active SQLAlchemy session.</p>
+</dd>
+<dt class="field-even">Returns<span class="colon">:</span></dt>
+<dd class="field-even"><p>The formatted answer.</p>
+</dd>
+<dt class="field-odd">Return type<span class="colon">:</span></dt>
+<dd class="field-odd"><p>str</p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py function">
+<dt class="sig sig-object py" id="database.orm_queries.orm_q7">
+<span class="sig-prename descclassname"><span class="pre">database.orm_queries.</span></span><span class="sig-name descname"><span class="pre">orm_q7</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">session</span></span></em><span class="sig-paren">)</span><a class="reference internal" href="../_modules/database/orm_queries.html#orm_q7"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#database.orm_queries.orm_q7" title="Link to this definition"></a></dt>
+<dd><p>Count of Johns Hopkins University master’s Computer Science entries.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Parameters<span class="colon">:</span></dt>
+<dd class="field-odd"><p><strong>session</strong> (<em>sqlalchemy.orm.Session</em>) – Active SQLAlchemy session.</p>
+</dd>
+<dt class="field-even">Returns<span class="colon">:</span></dt>
+<dd class="field-even"><p>The formatted answer.</p>
+</dd>
+<dt class="field-odd">Return type<span class="colon">:</span></dt>
+<dd class="field-odd"><p>str</p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py function">
+<dt class="sig sig-object py" id="database.orm_queries.orm_q8">
+<span class="sig-prename descclassname"><span class="pre">database.orm_queries.</span></span><span class="sig-name descname"><span class="pre">orm_q8</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">session</span></span></em><span class="sig-paren">)</span><a class="reference internal" href="../_modules/database/orm_queries.html#orm_q8"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#database.orm_queries.orm_q8" title="Link to this definition"></a></dt>
+<dd><p>How many Fall 2026 entries are PhD Computer Science acceptances at
+the listed universities?</p>
+<dl class="field-list simple">
+<dt class="field-odd">Parameters<span class="colon">:</span></dt>
+<dd class="field-odd"><p><strong>session</strong> (<em>sqlalchemy.orm.Session</em>) – Active SQLAlchemy session.</p>
+</dd>
+<dt class="field-even">Returns<span class="colon">:</span></dt>
+<dd class="field-even"><p>The formatted answer.</p>
+</dd>
+<dt class="field-odd">Return type<span class="colon">:</span></dt>
+<dd class="field-odd"><p>str</p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py function">
+<dt class="sig sig-object py" id="database.orm_queries.orm_q9">
+<span class="sig-prename descclassname"><span class="pre">database.orm_queries.</span></span><span class="sig-name descname"><span class="pre">orm_q9</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">session</span></span></em><span class="sig-paren">)</span><a class="reference internal" href="../_modules/database/orm_queries.html#orm_q9"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#database.orm_queries.orm_q9" title="Link to this definition"></a></dt>
+<dd><p>Repeat Q8 using the LLM-generated program/university fields, and
+report the difference.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Parameters<span class="colon">:</span></dt>
+<dd class="field-odd"><p><strong>session</strong> (<em>sqlalchemy.orm.Session</em>) – Active SQLAlchemy session.</p>
+</dd>
+<dt class="field-even">Returns<span class="colon">:</span></dt>
+<dd class="field-even"><p>The formatted answer.</p>
+</dd>
+<dt class="field-odd">Return type<span class="colon">:</span></dt>
+<dd class="field-odd"><p>str</p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py function">
+<dt class="sig sig-object py" id="database.orm_queries.run_orm_queries">
+<span class="sig-prename descclassname"><span class="pre">database.orm_queries.</span></span><span class="sig-name descname"><span class="pre">run_orm_queries</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">database_url</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">str</span></span></em><span class="sig-paren">)</span><a class="reference internal" href="../_modules/database/orm_queries.html#run_orm_queries"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#database.orm_queries.run_orm_queries" title="Link to this definition"></a></dt>
+<dd><p>Open a SQLAlchemy session against the applicants table and print
+the answer to each question in ORM_QUESTIONS.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Parameters<span class="colon">:</span></dt>
+<dd class="field-odd"><p><strong>database_url</strong> (<em>str</em>) – A “postgresql://user:password&#64;host:port/dbname”
+connection string.</p>
+</dd>
+<dt class="field-even">Returns<span class="colon">:</span></dt>
+<dd class="field-even"><p>None.</p>
+</dd>
+<dt class="field-odd">Return type<span class="colon">:</span></dt>
+<dd class="field-odd"><p>None</p>
+</dd>
+</dl>
+</dd></dl>
+
+</section>
+
+
+           </div>
+          </div>
+          <footer><div class="rst-footer-buttons" role="navigation" aria-label="Footer">
+        <a href="database.models.html" class="btn btn-neutral float-left" title="database.models module" accesskey="p" rel="prev"><span class="fa fa-arrow-circle-left" aria-hidden="true"></span> Previous</a>
+        <a href="database.query_data.html" class="btn btn-neutral float-right" title="database.query_data module" accesskey="n" rel="next">Next <span class="fa fa-arrow-circle-right" aria-hidden="true"></span></a>
+    </div>
+
+  <hr/>
+
+  <div role="contentinfo">
+    <p>&#169; Copyright 2026, Cameron Ela.</p>
+  </div>
+
+  Built with <a href="https://www.sphinx-doc.org/">Sphinx</a> using a
+    <a href="https://github.com/readthedocs/sphinx_rtd_theme">theme</a>
+    provided by <a href="https://readthedocs.org">Read the Docs</a>.
+   
+
+</footer>
+        </div>
+      </div>
+    </section>
+  </div>
+  <script>
+      jQuery(function () {
+          SphinxRtdTheme.Navigation.enable(true);
+      });
+  </script> 
+
+</body>
+</html>

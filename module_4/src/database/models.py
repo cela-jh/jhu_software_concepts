@@ -11,10 +11,12 @@ from sqlalchemy.orm import DeclarativeBase, Mapped, Session, mapped_column
 
 
 class Base(DeclarativeBase):
-    pass
+    """Declarative base class for every ORM model in this project."""
 
 
 class Applicant(Base):
+    """ORM model for a single row of the `applicants` table."""
+
     __tablename__ = "applicants"
 
     p_id: Mapped[int] = mapped_column(primary_key=True)
@@ -36,12 +38,16 @@ class Applicant(Base):
 
 def get_engine(database_url: str):
     """
-    Builds a SQLAlchemy engine for the same PostgreSQL database used by
-    load_data.py, from a "postgresql://user:password@host:port/dbname"
-    connection string (the psycopg driver is selected explicitly, since
-    plain "postgresql://" would otherwise resolve to SQLAlchemy's default
-    driver rather than the one this project installs).
-    Returns the engine.
+    Build a SQLAlchemy engine for the same PostgreSQL database used by
+    load_data.py. The psycopg driver is selected explicitly, since plain
+    "postgresql://" would otherwise resolve to SQLAlchemy's default
+    driver rather than the one this project installs.
+
+    :param database_url: A "postgresql://user:password@host:port/dbname"
+        connection string.
+    :type database_url: str
+    :returns: The engine.
+    :rtype: sqlalchemy.engine.Engine
     """
     url = make_url(database_url).set(drivername="postgresql+psycopg")
     return create_engine(url)
@@ -49,8 +55,13 @@ def get_engine(database_url: str):
 
 def get_session(database_url: str) -> Session:
     """
-    Opens a new SQLAlchemy Session bound to an engine for the same
+    Open a new SQLAlchemy Session bound to an engine for the same
     PostgreSQL database used by load_data.py.
-    Returns the session. The caller is responsible for closing it.
+
+    :param database_url: A "postgresql://user:password@host:port/dbname"
+        connection string.
+    :type database_url: str
+    :returns: The session. The caller is responsible for closing it.
+    :rtype: sqlalchemy.orm.Session
     """
     return Session(get_engine(database_url))

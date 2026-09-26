@@ -20,9 +20,13 @@ DEFAULT_LLM_DATA_FILE = DATA_DIR / "llm_extend_applicant_data.json"
 
 def state_path_for(data_filepath):
     """
-    Returns the sidecar state-file path in STATE_DIR matching the given
+    Return the sidecar state-file path in STATE_DIR matching the given
     data file's basename, creating STATE_DIR if it doesn't exist yet.
-    Returns a Path.
+
+    :param data_filepath: Path to the data file this state file tracks.
+    :type data_filepath: str or pathlib.Path
+    :returns: Path to the corresponding `.state.json` file in STATE_DIR.
+    :rtype: pathlib.Path
     """
     STATE_DIR.mkdir(parents=True, exist_ok=True)
     return STATE_DIR / Path(data_filepath).with_suffix(".state.json").name

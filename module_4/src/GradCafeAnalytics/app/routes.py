@@ -41,7 +41,7 @@ def analysis():
     if database_url is None:
         return (
             "Set the DATABASE_URL environment variable before running "
-            "app.py, then restart the server.",
+            "run.py, then restart the server.",
             500,
         )
 

@@ -26,7 +26,7 @@ Four files, each independently executable, cover this project's work:
 1. `src/GradCafeAnalytics/scraping/scrape.py` - Scrapes publicly posted graduate admissions results from GradCafe (thegradcafe.com/survey) into a JSON file (`data/applicant_data.json`).
 2. `src/GradCafeAnalytics/database/load_data.py` - Loads a results file (`applicant_data.json`, or the LLM-standardized `llm_extend_applicant_data.json`) into a PostgreSQL table called `applicants`.
 3. `src/GradCafeAnalytics/database/query_data.py` - Runs the Part 2 SQL analysis queries against the `applicants` table and prints each answer to the console.
-4. `src/GradCafeAnalytics/app.py` - A Flask app displaying every analysis answer on one webpage, read live through the SQLAlchemy `Applicant` model rather than `query_data.py`'s raw-SQL path. Its Pull Data button runs `scrape.py` in the background to fetch newly submitted entries and load them into PostgreSQL; Update Analysis re-renders the page with current results without starting a scrape.
+4. `src/GradCafeAnalytics/run.py` - A Flask app displaying every analysis answer on one webpage, read live through the SQLAlchemy `Applicant` model rather than `query_data.py`'s raw-SQL path. Its Pull Data button runs `scrape.py` in the background to fetch newly submitted entries and load them into PostgreSQL; Update Analysis re-renders the page with current results without starting a scrape.
 
 ### File tree
 
@@ -40,11 +40,11 @@ module_4/
 |   `-- .state/
 |       `-- applicant_data.state.json : resumable-crawl sidecar (section 5)
 |-- docs/
-|   |-- query_results.pdf   : Part 2 write-up (question, result, SQL, explanation)
-|   `-- limitations.pdf, screenshots
+|   |-- source/             : Sphinx project (conf.py, index.rst, autodoc module stubs)
+|   `-- build/               : generated HTML output (`sphinx-build -b html docs/source docs/build`)
 `-- src/GradCafeAnalytics/
     |-- paths.py           : shared DATA_DIR/STATE_DIR/SCRAPE_SCRIPT locations, resolved from this file
-    |-- app.py             : starts the Flask server
+    |-- run.py             : starts the Flask server
     |-- app/               : the Flask presentation layer
     |   |-- __init__.py     : builds the Flask app and registers its routes
     |   |-- routes.py       : the analysis page route, read live through the ORM
@@ -79,12 +79,12 @@ module_4/
    - macOS: `/Applications/Google Chrome.app/Contents/MacOS/Google Chrome`
    - Windows: `C:\Program Files\Google\Chrome\Application\chrome.exe`
    - Linux: usually `google-chrome` on PATH
-5. Set `DATABASE_URL` (needed for `load_data.py`, `app.py`, `query_data.py`, `orm_queries.py`) to a `postgresql://user:password@host:port/dbname` connection string:
+5. Set `DATABASE_URL` (needed for `load_data.py`, `run.py`, `query_data.py`, `orm_queries.py`) to a `postgresql://user:password@host:port/dbname` connection string:
    ```
    export DATABASE_URL=postgresql://your_postgres_user:your_postgres_password@localhost:5432/cam_db
    ```
    On a locally trust-authed PostgreSQL install (no password needed), the password segment can be omitted entirely: `postgresql://your_postgres_user@localhost:5432/cam_db`.
-6. `app.py`'s Pull Data button also needs `CHROME_BINARY` set to the path from step 4.
+6. `run.py`'s Pull Data button also needs `CHROME_BINARY` set to the path from step 4.
 
 ## 3. CLI Usage
 
@@ -108,7 +108,7 @@ Validates every result, skips and reports any missing required fields, and upser
 
 **Running the analysis webpage:**
 ```
-DATABASE_URL=postgresql://youruser:yourpassword@localhost:5432/yourdb CHROME_BINARY="<path to Chrome>" python src/GradCafeAnalytics/app.py [--file path/to/results.json]
+DATABASE_URL=postgresql://youruser:yourpassword@localhost:5432/yourdb CHROME_BINARY="<path to Chrome>" python src/GradCafeAnalytics/run.py [--file path/to/results.json]
 ```
 Open http://127.0.0.1:5000/analysis. Every answer is read live from PostgreSQL through the `Applicant` model on each page load; if PostgreSQL itself is unreachable, the page shows a plain "database is currently unavailable" message (HTTP 503) rather than crashing. `CHROME_BINARY` is only needed for Pull Data. `--file` is optional and defaults to `data/applicant_data.json`; when set, both Pull Data (what it writes to and loads from) and Update Analysis (what it re-syncs) use that file instead - for example, pointing at `data/llm_extend_applicant_data.json` to keep the LLM-standardized fields flowing through Update Analysis.
 
@@ -124,7 +124,7 @@ Open http://127.0.0.1:5000/analysis. Every answer is read live from PostgreSQL t
 
 ## 4. Cloudflare Workaround
 
-A plain urllib scrape returns HTTP 403, and a normal Selenium-launched Chrome fares no better, since Selenium's own browser-launch carries automation fingerprints that trigger a repeating "verify you are human" loop. The fix: launch a real Chrome process independently via `subprocess` (not through Selenium) with remote debugging enabled and a persistent profile, then attach Selenium to it over the DevTools Protocol. Since Selenium never launches the browser itself, it never carries the fingerprint that triggers the loop. If Cloudflare's challenge still appears, a human solves it once in the visible window; the script polls the page title until it clears rather than waiting on a keypress, so this works the same whether run directly or as `app.py`'s background Pull Data subprocess, which has no terminal. The cleared session then persists in that Chrome profile for the rest of the run and future runs.
+A plain urllib scrape returns HTTP 403, and a normal Selenium-launched Chrome fares no better, since Selenium's own browser-launch carries automation fingerprints that trigger a repeating "verify you are human" loop. The fix: launch a real Chrome process independently via `subprocess` (not through Selenium) with remote debugging enabled and a persistent profile, then attach Selenium to it over the DevTools Protocol. Since Selenium never launches the browser itself, it never carries the fingerprint that triggers the loop. If Cloudflare's challenge still appears, a human solves it once in the visible window; the script polls the page title until it clears rather than waiting on a keypress, so this works the same whether run directly or as `run.py`'s background Pull Data subprocess, which has no terminal. The cleared session then persists in that Chrome profile for the rest of the run and future runs.
 
 ## 5. Function Reference
 
@@ -172,23 +172,23 @@ Holds `QUESTION_QUERY`, the list of (question, SQL, format_result) tuples for th
 - `get_engine(database_url)` / `get_session(database_url)` - Build a SQLAlchemy engine/session from a `DATABASE_URL`-style connection string, selecting the `psycopg` driver explicitly.
 
 ### `database/orm_queries.py`
-- `orm_q1` through `orm_q9`, `orm_a1`, `orm_a2` - Repeat the matching Part 2 question with SQLAlchemy's `select()`/`where()`/`func()`/`and_()`/`or_()`, returning the same formatted answer as `query_data.py`. Term/status/nationality comparisons use case-insensitive `ilike()` rather than `==`, so a mixed-case value (e.g. "fall 2026") still matches; percentage denominators are computed independently of whatever column the numerator's `CASE` expression checks, so a blank or unusual value in that column doesn't silently drop a row from the total. `ALL_ORM_ANSWERS` lists all eleven for `app.py`; `ORM_QUESTIONS` lists Q1, Q4, Q5, Q8, Q9, and A1 for `run_orm_queries()`.
+- `orm_q1` through `orm_q9`, `orm_a1`, `orm_a2` - Repeat the matching Part 2 question with SQLAlchemy's `select()`/`where()`/`func()`/`and_()`/`or_()`, returning the same formatted answer as `query_data.py`. Term/status/nationality comparisons use case-insensitive `ilike()` rather than `==`, so a mixed-case value (e.g. "fall 2026") still matches; percentage denominators are computed independently of whatever column the numerator's `CASE` expression checks, so a blank or unusual value in that column doesn't silently drop a row from the total. `ALL_ORM_ANSWERS` lists all eleven for `run.py`; `ORM_QUESTIONS` lists Q1, Q4, Q5, Q8, Q9, and A1 for `run_orm_queries()`.
 - `run_orm_queries(database_url)` / `_database_url()` - Same pattern as `query_data.py`.
 
-`app.py` imports and runs the Flask app from `app/`, calling `pull_control.kill_stale_chrome()` on startup and shutdown so an orphaned Chrome process never blocks the next Pull Data click.
+`run.py` imports and runs the Flask app from `app/`, calling `pull_control.kill_stale_chrome()` on startup and shutdown so an orphaned Chrome process never blocks the next Pull Data click.
 
 ### `app/routes.py`
 - `analysis()` - Route for `/analysis`. Runs every `orm_queries.ALL_ORM_ANSWERS` function against a fresh SQLAlchemy session, pairs each with its question text, and renders `analysis.html` with the Pull Data button's current state. Returns a plain error message if `DATABASE_URL` is unset (500), or a plain "database unavailable" message if PostgreSQL can't actually be reached (503), rather than an unhandled crash either way.
 - `pull_start()` / `pull_cancel()` / `pull_status()` - Routes behind the Pull Data button (`POST /pull-data`, `POST /pull/cancel`, `GET /pull/status`), handing off to `pull_control` and returning JSON status. `pull_start()` and `update_analysis()` both include `ok`/`busy` boolean keys in their JSON responses alongside the existing `status`/`message` fields.
 
 ### `app/pull_control.py`
-Tracks the single background pull `app.py` may have running, guarded by a lock.
+Tracks the single background pull `run.py` may have running, guarded by a lock.
 - `kill_stale_chrome()` - Kills any process left listening on Chrome's remote debugging port from an earlier ungraceful exit.
 - `is_running()` / `recent_lines()` - Whether a pull (scrape or its upload) is active, and its last five status lines.
 - `start(chrome_binary, credentials)` - Starts `scrape.py` in pull mode if none is running, streams its output into `recent_lines()`, and loads results into PostgreSQL once it exits.
 - `cancel()` - Sends SIGTERM to the running subprocess if still scraping; the upload step still runs on whatever was collected.
 
-There is no `main.py`; `scrape.py`, `load_data.py`, `query_data.py`, and `app.py` each define their own `parse_args()` (or, for `app.py`, take no arguments) and run when executed directly.
+There is no `main.py`; `scrape.py`, `load_data.py`, `query_data.py`, and `run.py` each define their own `parse_args()` (or, for `run.py`, take no arguments) and run when executed directly.
 
 ## 6. Loading Into PostgreSQL
 
@@ -218,7 +218,7 @@ CREATE TABLE IF NOT EXISTS applicants (
 
 ### Credentials
 
-PostgreSQL credentials are never hardcoded and are always passed as a single `DATABASE_URL` connection string (`postgresql://user:password@host:port/dbname`). `load_data.py`, `app.py`, `query_data.py`, and `orm_queries.py` all read it from the environment at runtime rather than a CLI flag, since a flag's value is visible to other users (via `ps`) and saved in shell history. This also means tests can point the whole application at a different database (`cam_db_test`, in this project's own test suite) just by setting `DATABASE_URL` differently, with no other configuration to override.
+PostgreSQL credentials are never hardcoded and are always passed as a single `DATABASE_URL` connection string (`postgresql://user:password@host:port/dbname`). `load_data.py`, `run.py`, `query_data.py`, and `orm_queries.py` all read it from the environment at runtime rather than a CLI flag, since a flag's value is visible to other users (via `ps`) and saved in shell history. This also means tests can point the whole application at a different database (`cam_db_test`, in this project's own test suite) just by setting `DATABASE_URL` differently, with no other configuration to override.
 
 ### Validation and missing values
 
@@ -308,7 +308,7 @@ GradCafe's robots.txt was reviewed manually before writing any scraping code and
 
 - Explicit Selenium waits (`WebDriverWait`) aren't used; page-readiness is inferred from a results-table check plus a jittered delay, a deliberate tradeoff that means a page could in principle be read slightly before fully rendering.
 - `storage.py`'s `save_data()` assumes the file it's appending to ends in exactly the bytes it last wrote; a file edited by hand or another tool afterward could break that assumption.
-- If `app.py` is restarted mid-pull, `pull_control`'s in-memory state is lost and the page shows Pull Data as idle even though the old Chrome process may still be running. Restart cleans up that orphaned Chrome process first, so only the tracking of that run is lost.
+- If `run.py` is restarted mid-pull, `pull_control`'s in-memory state is lost and the page shows Pull Data as idle even though the old Chrome process may still be running. Restart cleans up that orphaned Chrome process first, so only the tracking of that run is lost.
 
 ## 11. Citations
 

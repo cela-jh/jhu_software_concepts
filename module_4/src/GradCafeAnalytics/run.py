@@ -1,5 +1,5 @@
 """
-`app.py`
+`run.py`
 Starts the Flask analysis webpage; the app itself lives in app/.
 """
 import argparse

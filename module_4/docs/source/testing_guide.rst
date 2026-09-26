@@ -27,21 +27,28 @@ with the ``module_4/tests`` path included:
 
    pytest module_4/tests -m "web or buttons or analysis or db or integration"
 
-This differs from a bare ``pytest -m "..."`` with no path, because
-``pytest.ini`` lives in ``module_4/`` and its ``addopts`` sets
-``--cov=module_4/src``, a path resolved relative to the invocation
-directory rather than to ``pytest.ini``'s own location. Concretely:
+A bare ``pytest -m "..."`` with no path, run from the repository root,
+does correctly run and pass the entire marked suite - marker filtering
+doesn't require ``pytest.ini`` to be found at all. What it doesn't do is
+enforce coverage, since ``pytest.ini``'s ``addopts`` (which sets
+``--cov=module_4/src --cov-fail-under=100``) is never loaded without the
+config file being found, and pytest's config-file search only looks
+*upward* from the current directory - ``pytest.ini`` lives in
+``module_4/``, which isn't an ancestor of the repository root. It also
+emits a mark-registration warning per test. Concretely:
 
-- Bare ``pytest -m "..."`` from ``module_4/``: finds ``pytest.ini``, but
-  ``--cov=module_4/src`` then resolves to the nonexistent
-  ``module_4/module_4/src`` - fails with "Total coverage: 0.00%".
-- Bare ``pytest -m "..."`` from the repository root: ``--cov=module_4/src``
-  would resolve correctly, but ``pytest.ini`` is never found at all.
+- Bare ``pytest -m "..."`` from the repository root: runs and passes the
+  full marked suite, but with no coverage enforcement.
+- Bare ``pytest -m "..."`` from ``module_4/``: ``pytest.ini`` *is* found,
+  but its ``--cov-config=module_4/pytest.ini`` then resolves to the
+  nonexistent ``module_4/module_4/pytest.ini`` and coverage.py raises a
+  hard ``ConfigError``, so the run doesn't complete at all.
 - ``pytest module_4/tests -m "..."`` from the repository root: pytest's
   config search starts from ``module_4/tests`` and walks upward to find
   ``module_4/pytest.ini``, while ``--cov=module_4/src`` is correct
-  relative to the repository root. This is the only invocation that
-  satisfies both at once.
+  relative to the repository root. This is the only invocation that also
+  enforces the 100% coverage gate, which is why it's what this project
+  actually uses and what CI runs.
 
 Markers
 -------

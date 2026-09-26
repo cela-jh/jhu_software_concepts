@@ -108,21 +108,28 @@ with the <code class="docutils literal notranslate"><span class="pre">module_4/t
 <div class="highlight-console notranslate"><div class="highlight"><pre><span></span><span class="go">pytest module_4/tests -m "web or buttons or analysis or db or integration"</span>
 </pre></div>
 </div>
-<p>This differs from a bare <code class="docutils literal notranslate"><span class="pre">pytest</span> <span class="pre">-m</span> <span class="pre">&quot;...&quot;</span></code> with no path, because
-<code class="docutils literal notranslate"><span class="pre">pytest.ini</span></code> lives in <code class="docutils literal notranslate"><span class="pre">module_4/</span></code> and its <code class="docutils literal notranslate"><span class="pre">addopts</span></code> sets
-<code class="docutils literal notranslate"><span class="pre">--cov=module_4/src</span></code>, a path resolved relative to the invocation
-directory rather than to <code class="docutils literal notranslate"><span class="pre">pytest.ini</span></code>’s own location. Concretely:</p>
+<p>A bare <code class="docutils literal notranslate"><span class="pre">pytest</span> <span class="pre">-m</span> <span class="pre">&quot;...&quot;</span></code> with no path, run from the repository root,
+does correctly run and pass the entire marked suite - marker filtering
+doesn’t require <code class="docutils literal notranslate"><span class="pre">pytest.ini</span></code> to be found at all. What it doesn’t do is
+enforce coverage, since <code class="docutils literal notranslate"><span class="pre">pytest.ini</span></code>’s <code class="docutils literal notranslate"><span class="pre">addopts</span></code> (which sets
+<code class="docutils literal notranslate"><span class="pre">--cov=module_4/src</span> <span class="pre">--cov-fail-under=100</span></code>) is never loaded without the
+config file being found, and pytest’s config-file search only looks
+<em>upward</em> from the current directory - <code class="docutils literal notranslate"><span class="pre">pytest.ini</span></code> lives in
+<code class="docutils literal notranslate"><span class="pre">module_4/</span></code>, which isn’t an ancestor of the repository root. It also
+emits a mark-registration warning per test. Concretely:</p>
 <ul class="simple">
-<li><p>Bare <code class="docutils literal notranslate"><span class="pre">pytest</span> <span class="pre">-m</span> <span class="pre">&quot;...&quot;</span></code> from <code class="docutils literal notranslate"><span class="pre">module_4/</span></code>: finds <code class="docutils literal notranslate"><span class="pre">pytest.ini</span></code>, but
-<code class="docutils literal notranslate"><span class="pre">--cov=module_4/src</span></code> then resolves to the nonexistent
-<code class="docutils literal notranslate"><span class="pre">module_4/module_4/src</span></code> - fails with “Total coverage: 0.00%”.</p></li>
-<li><p>Bare <code class="docutils literal notranslate"><span class="pre">pytest</span> <span class="pre">-m</span> <span class="pre">&quot;...&quot;</span></code> from the repository root: <code class="docutils literal notranslate"><span class="pre">--cov=module_4/src</span></code>
-would resolve correctly, but <code class="docutils literal notranslate"><span class="pre">pytest.ini</span></code> is never found at all.</p></li>
+<li><p>Bare <code class="docutils literal notranslate"><span class="pre">pytest</span> <span class="pre">-m</span> <span class="pre">&quot;...&quot;</span></code> from the repository root: runs and passes the
+full marked suite, but with no coverage enforcement.</p></li>
+<li><p>Bare <code class="docutils literal notranslate"><span class="pre">pytest</span> <span class="pre">-m</span> <span class="pre">&quot;...&quot;</span></code> from <code class="docutils literal notranslate"><span class="pre">module_4/</span></code>: <code class="docutils literal notranslate"><span class="pre">pytest.ini</span></code> <em>is</em> found,
+but its <code class="docutils literal notranslate"><span class="pre">--cov-config=module_4/pytest.ini</span></code> then resolves to the
+nonexistent <code class="docutils literal notranslate"><span class="pre">module_4/module_4/pytest.ini</span></code> and coverage.py raises a
+hard <code class="docutils literal notranslate"><span class="pre">ConfigError</span></code>, so the run doesn’t complete at all.</p></li>
 <li><p><code class="docutils literal notranslate"><span class="pre">pytest</span> <span class="pre">module_4/tests</span> <span class="pre">-m</span> <span class="pre">&quot;...&quot;</span></code> from the repository root: pytest’s
 config search starts from <code class="docutils literal notranslate"><span class="pre">module_4/tests</span></code> and walks upward to find
 <code class="docutils literal notranslate"><span class="pre">module_4/pytest.ini</span></code>, while <code class="docutils literal notranslate"><span class="pre">--cov=module_4/src</span></code> is correct
-relative to the repository root. This is the only invocation that
-satisfies both at once.</p></li>
+relative to the repository root. This is the only invocation that also
+enforces the 100% coverage gate, which is why it’s what this project
+actually uses and what CI runs.</p></li>
 </ul>
 </section>
 <section id="markers">

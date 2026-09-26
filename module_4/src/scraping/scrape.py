@@ -29,7 +29,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 from clean import clean_data
 from storage import save_data, validate_filepath, save_state, load_state, load_existing_urls
 
-# paths.py is a sibling of scraping/, directly under GradCafeAnalytics/.
+# paths.py is a sibling of scraping/, directly under src/.
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 from paths import DEFAULT_DATA_FILE, state_path_for
 

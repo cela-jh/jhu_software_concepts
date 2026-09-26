@@ -1,17 +1,17 @@
 """
 `conftest.py`
 Shared pytest fixtures for the GradCafeAnalytics test suite. Puts
-src/GradCafeAnalytics on the import path so tests can import `app`,
-`database`, `scraping`, and `paths` the same way the application itself
-does when run.py is run directly, then hands out a fresh Flask app and
-test client per test.
+src/ on the import path so tests can import `app`, `database`,
+`scraping`, and `paths` the same way the application itself does when
+run.py is run directly, then hands out a fresh Flask app and test
+client per test.
 """
 import getpass
 import os
 import sys
 from pathlib import Path
 
-SRC_DIR = Path(__file__).resolve().parent.parent / "src" / "GradCafeAnalytics"
+SRC_DIR = Path(__file__).resolve().parent.parent / "src"
 sys.path.insert(0, str(SRC_DIR))
 
 import pytest

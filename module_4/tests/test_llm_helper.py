@@ -18,7 +18,7 @@ from types import SimpleNamespace
 
 import pytest
 
-LLM_HOSTING_DIR = Path(__file__).resolve().parent.parent / "src" / "GradCafeAnalytics" / "llm_hosting"
+LLM_HOSTING_DIR = Path(__file__).resolve().parent.parent / "src" / "llm_hosting"
 sys.path.insert(0, str(LLM_HOSTING_DIR))
 
 import llm_helper

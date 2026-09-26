@@ -7,7 +7,7 @@ a script here is invoked.
 from pathlib import Path
 
 PACKAGE_DIR = Path(__file__).resolve().parent
-PROJECT_DIR = PACKAGE_DIR.parent.parent
+PROJECT_DIR = PACKAGE_DIR.parent
 
 SCRAPE_SCRIPT = PACKAGE_DIR / "scraping" / "scrape.py"
 

@@ -5,7 +5,7 @@ route, and the CLI file processor - with the actual LLM (Llama) and any
 model download always mocked, so nothing here ever loads a real model or
 touches the network. Loaded via importlib under the name "llm_app" since
 a bare `import app` would resolve to the already-cached Flask `app`
-package from GradCafeAnalytics instead (see conftest.py).
+package instead (see conftest.py).
 """
 import importlib.util
 import json
@@ -16,7 +16,7 @@ from types import SimpleNamespace
 
 import pytest
 
-LLM_HOSTING_DIR = Path(__file__).resolve().parent.parent / "src" / "GradCafeAnalytics" / "llm_hosting"
+LLM_HOSTING_DIR = Path(__file__).resolve().parent.parent / "src" / "llm_hosting"
 if str(LLM_HOSTING_DIR) not in sys.path:
     sys.path.insert(0, str(LLM_HOSTING_DIR))
 

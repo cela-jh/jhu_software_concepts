@@ -1,42 +1,17 @@
 """
 `test_llm_app.py`
 Covers llm_hosting/app.py: canonical-name normalization, the standardize
-route, and the CLI file processor - with the actual LLM (Llama) and any
-model download always mocked, so nothing here ever loads a real model or
-touches the network. Loaded via importlib under the name "llm_app" since
-a bare `import app` would resolve to the already-cached Flask `app`
-package instead (see conftest.py).
+route, the CLI file processor, and the CLI entry point - with the actual
+LLM (Llama) and any model download always mocked, so nothing here ever
+loads a real model or touches the network.
 """
-import importlib.util
 import json
-import os
-import sys
 from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
 
-LLM_HOSTING_DIR = Path(__file__).resolve().parent.parent / "src" / "llm_hosting"
-if str(LLM_HOSTING_DIR) not in sys.path:
-    sys.path.insert(0, str(LLM_HOSTING_DIR))
-
-# app.py reads these as cwd-relative by default; point them at the real
-# files by absolute path so canonical-name matching is exercised for real,
-# regardless of pytest's invocation directory.
-os.environ.setdefault("CANON_UNIS_PATH", str(LLM_HOSTING_DIR / "canon_universities.txt"))
-os.environ.setdefault("CANON_PROGS_PATH", str(LLM_HOSTING_DIR / "canon_programs.txt"))
-
-_spec = importlib.util.spec_from_file_location("llm_app", LLM_HOSTING_DIR / "app.py")
-llm_app = importlib.util.module_from_spec(_spec)
-sys.modules["llm_app"] = llm_app
-_spec.loader.exec_module(llm_app)
-
-
-@pytest.fixture
-def fake_models_dir(tmp_path, monkeypatch):
-    models_dir = tmp_path / "models"
-    monkeypatch.setattr(llm_app, "MODELS_DIR", models_dir)
-    return models_dir
+import llm_hosting.app as llm_app
 
 
 @pytest.mark.web
@@ -53,39 +28,28 @@ def test_read_lines_returns_empty_list_when_file_missing(tmp_path):
 
 
 @pytest.mark.web
-def test_get_model_path_reuses_existing_file(fake_models_dir):
-    fake_models_dir.mkdir()
-    model_file = fake_models_dir / llm_app.MODEL_FILE
-    model_file.write_text("fake gguf bytes")
+def test_canon_lists_default_to_files_beside_app():
+    """The canonical lists must load no matter which directory the
+    standardizer starts from, including src/ for parallel workers."""
+    app_dir = Path(llm_app.__file__).resolve().parent
 
-    assert llm_app._get_model_path() == str(model_file)
-
-
-@pytest.mark.web
-def test_get_model_path_downloads_when_missing(fake_models_dir, monkeypatch):
-    download_calls = []
-
-    def _fake_download(repo_id, filename, local_dir):
-        download_calls.append((repo_id, filename, local_dir))
-        return "/fake/downloaded/model.gguf"
-
-    monkeypatch.setattr(llm_app, "hf_hub_download", _fake_download)
-
-    result = llm_app._get_model_path()
-
-    assert result == "/fake/downloaded/model.gguf"
-    assert download_calls == [(llm_app.MODEL_REPO, llm_app.MODEL_FILE, str(fake_models_dir))]
+    assert Path(llm_app.CANON_UNIS_PATH).parent == app_dir
+    assert llm_app.CANON_UNIS
+    assert llm_app.CANON_PROGS
 
 
 @pytest.mark.web
 def test_load_llm_caches_across_calls(monkeypatch):
-    monkeypatch.setattr(llm_app, "_LLM", None)
-    monkeypatch.setattr(llm_app, "_get_model_path", lambda: "/fake/model.gguf")
+    llm_app._load_llm.cache_clear()
+    monkeypatch.setattr(llm_app, "get_model_path", lambda: "/fake/model.gguf")
     construct_calls = []
     monkeypatch.setattr(llm_app, "Llama", lambda **kwargs: construct_calls.append(kwargs) or "fake_llm")
 
-    first = llm_app._load_llm()
-    second = llm_app._load_llm()
+    try:
+        first = llm_app._load_llm()
+        second = llm_app._load_llm()
+    finally:
+        llm_app._load_llm.cache_clear()  # never leak the fake model to other tests
 
     assert first == "fake_llm"
     assert second == "fake_llm"
@@ -194,6 +158,20 @@ def test_call_llm_falls_back_on_unparseable_response(monkeypatch):
 
     # A name with no realistic overlap in the real canonical list, so this
     # asserts the fallback-parse path itself, not incidental fuzzy-matching.
+    result = llm_app._call_llm("Computer Science, Xyzzqrp Nonexistent Place")
+
+    assert result["llm_generated_program"] == "Computer Science"
+    assert result["llm_generated_university"] == "Xyzzqrp Nonexistent Place"
+
+
+@pytest.mark.web
+def test_call_llm_falls_back_when_json_is_not_an_object(monkeypatch):
+    """Valid JSON that isn't an object (here a list) has no fields to
+    read, so the rule-based split must be used instead of crashing."""
+    response = _FakeLlmResponse.build('["Computer Science", "Somewhere"]')
+    fake_llm = SimpleNamespace(create_chat_completion=lambda **kw: response)
+    monkeypatch.setattr(llm_app, "_load_llm", lambda: fake_llm)
+
     result = llm_app._call_llm("Computer Science, Xyzzqrp Nonexistent Place")
 
     assert result["llm_generated_program"] == "Computer Science"
@@ -312,3 +290,57 @@ def test_cli_process_file_writes_to_stdout(tmp_path, monkeypatch, capsys):
 
     out = capsys.readouterr().out
     assert '"llm-generated-program": "CS"' in out
+
+
+@pytest.mark.web
+def test_parse_args_defaults(monkeypatch):
+    monkeypatch.setattr("sys.argv", ["app.py"])
+
+    args = llm_app.parse_args()
+
+    assert args.file is None
+    assert args.serve is False
+    assert args.parallel is False
+    assert args.n_workers == 4
+
+
+@pytest.fixture
+def main_calls(monkeypatch):
+    """Records which of main()'s three modes ran, without starting a
+    server, workers, or the LLM."""
+    calls = SimpleNamespace(serve=[], parallel=[], file=[])
+    monkeypatch.setattr(llm_app.app, "run", lambda **kw: calls.serve.append(kw))
+    monkeypatch.setattr(llm_app, "run_parallel", lambda *a: calls.parallel.append(a))
+    monkeypatch.setattr(llm_app, "_cli_process_file", lambda **kw: calls.file.append(kw))
+    return calls
+
+
+def _main_args(**overrides):
+    args = dict(file=None, serve=False, parallel=False, out=None, append=False,
+                stdout=False, n_workers=4, n_threads=1)
+    args.update(overrides)
+    return SimpleNamespace(**args)
+
+
+@pytest.mark.web
+def test_main_serves_when_no_file_given(main_calls):
+    llm_app.main(_main_args())
+
+    assert len(main_calls.serve) == 1
+    assert main_calls.parallel == [] and main_calls.file == []
+
+
+@pytest.mark.web
+def test_main_runs_parallel_with_default_output_path(main_calls):
+    llm_app.main(_main_args(file="in.json", parallel=True, n_workers=2))
+
+    assert main_calls.parallel == [("in.json", "in.json.json", 2, 1)]
+
+
+@pytest.mark.web
+def test_main_processes_single_file(main_calls):
+    llm_app.main(_main_args(file="in.json", out="out.jsonl", append=True))
+
+    assert main_calls.file == [
+        {"in_path": "in.json", "out_path": "out.jsonl", "append": True, "to_stdout": False}
+    ]

@@ -16,9 +16,10 @@ Cameron Ela, cela1@jh.edu
 8. [Local LLM Standardization](#8-local-llm-standardization)
 9. [Robots.txt Compliance](#9-robotstxt-compliance)
 10. [Known Bugs / Limitations](#10-known-bugs--limitations)
-11. [Testing](#11-testing)
-12. [Documentation](#12-documentation)
-13. [Citations](#13-citations)
+11. [Linting (Pylint)](#11-linting-pylint)
+12. [Testing](#12-testing)
+13. [Documentation](#13-documentation)
+14. [Citations](#14-citations)
 
 ## 1. Overview
 
@@ -37,7 +38,7 @@ module_4/
 |-- requirements.txt
 |-- pytest.ini
 |-- schema.sql             : applicants table DDL, loaded locally and by CI
-|-- coverage_summary.txt   : committed terminal coverage report (section 11)
+|-- coverage_summary.txt   : committed terminal coverage report (section 12)
 |-- venv/                  : project virtual environment
 |-- tests/                 : all test code (markers: web, buttons, analysis, db, integration)
 |-- data/
@@ -49,7 +50,7 @@ module_4/
 |   |-- source/             : Sphinx project (conf.py, index.rst, autodoc module stubs)
 |   `-- build/               : generated HTML output (`sphinx-build -b html docs/source docs/build`)
 `-- src/
-    |-- paths.py           : shared DATA_DIR/STATE_DIR/SCRAPE_SCRIPT locations, resolved from this file
+    |-- paths.py           : shared PACKAGE_DIR/DATA_DIR/STATE_DIR locations, resolved from this file
     |-- run.py             : starts the Flask server
     |-- app/               : the Flask presentation layer
     |   |-- __init__.py     : builds the Flask app and registers its routes
@@ -70,7 +71,7 @@ module_4/
     `-- llm_hosting/       : provided local-LLM standardizer, extended (section 8), kept as its own installable tool
 ```
 
-`scrape.py` imports `clean.py` and `storage.py` by name; Python adds a script's own directory to its import path when run directly, and all three live in `scraping/`. Any file that needs a sibling module in another package (`load_data.py` reusing `storage.py`'s `validate_filepath`, `pull_control.py` reusing `load_data.py`, `routes.py` reusing `database`'s modules, or anything needing `paths.py`) inserts `src/` onto its import path at startup, the same technique module_3 used for `module_2_files/`, just repointed at the new layout. `paths.py` centralizes `data/`, `data/.state/`, and `scrape.py`'s own location as constants so no file hardcodes a path to another directory more than once.
+Every module imports its dependencies by their full package path rooted at `src/` (for example `from database.db_helpers import connect_db` or `from scraping.clean import clean_data`), and no file edits `sys.path`. Scripts under a package are therefore run as modules from `src/` (`python -m database.load_data`), which puts `src/` on the import path the same way for every entry point. Background subprocesses follow the same rule: Pull Data launches `python -m scraping.scrape` and the parallel LLM standardizer launches `python -m llm_hosting.app` workers, each with `src/` as the working directory. `paths.py` centralizes `src/`, `data/`, and `data/.state/` as constants so no file hardcodes a path to another directory more than once.
 
 ## 2. Setup
 
@@ -94,27 +95,27 @@ module_4/
 
 ## 3. CLI Usage
 
-Each command below is run on its own from `module_4`; none depend on a shared entry point. Every script resolves `data/` from its own file location via `paths.py`, so these all work the same regardless of current directory.
+Each command below is run on its own from `module_5/src`; none depend on a shared entry point. Package scripts run as modules (`python -m package.module`) so their package imports resolve. Every script resolves `data/` from its own file location via `paths.py`, so the default data paths are the same regardless of current directory.
 
 **Scraping:**
 ```
-python src/scraping/scrape.py --num_results <N> --chrome_binary "<path to Chrome>" [output.json]
+python -m scraping.scrape --num_results <N> --chrome_binary "<path to Chrome>" [output.json]
 ```
 `--num_results` is the cumulative target for the whole crawl, including a resumed run's prior results, not "collect N more." A real Chrome window opens and navigates to GradCafe; if Cloudflare's challenge appears, solve it manually once (the script polls for it to clear rather than waiting on a keypress, so this also works with no terminal attached, as during a Pull Data run). Transient page failures (including Cloudflare 522s) are retried with exponential backoff instead of stopping the run. If interrupted, re-running the same command with the same output file resumes from saved state (`data/.state/`).
 
 **Loading into PostgreSQL:**
 ```
-DATABASE_URL=postgresql://youruser:yourpassword@localhost:5432/yourdb python src/database/load_data.py <file.json>
+DATABASE_URL=postgresql://youruser:yourpassword@localhost:5432/yourdb python -m database.load_data <file.json>
 ```
 Validates every result, skips and reports any missing required fields, and upserts the rest (see [section 6](#6-loading-into-postgresql) for details). Prints a summary of loaded/updated/skipped counts at the end, and exits with a non-zero status if the file couldn't be read or the database couldn't be reached at all, so a calling script or CI step can tell an unsuccessful load apart from a completed one.
 
-**Running the Part 2 SQL analysis:** `DATABASE_URL=postgresql://youruser:yourpassword@localhost:5432/yourdb python src/database/query_data.py`
+**Running the Part 2 SQL analysis:** `DATABASE_URL=postgresql://youruser:yourpassword@localhost:5432/yourdb python -m database.query_data`
 
-**Running the Part 6 SQLAlchemy ORM analysis:** `DATABASE_URL=postgresql://youruser:yourpassword@localhost:5432/yourdb python src/database/orm_queries.py`
+**Running the Part 6 SQLAlchemy ORM analysis:** `DATABASE_URL=postgresql://youruser:yourpassword@localhost:5432/yourdb python -m database.orm_queries`
 
 **Running the analysis webpage:**
 ```
-DATABASE_URL=postgresql://youruser:yourpassword@localhost:5432/yourdb CHROME_BINARY="<path to Chrome>" python src/run.py [--file path/to/results.json]
+DATABASE_URL=postgresql://youruser:yourpassword@localhost:5432/yourdb CHROME_BINARY="<path to Chrome>" python run.py [--file path/to/results.json]
 ```
 Open http://127.0.0.1:5000/analysis. Every answer is read live from PostgreSQL through the `Applicant` model on each page load; if PostgreSQL itself is unreachable, the page shows a plain "database is currently unavailable" message (HTTP 503) rather than crashing. `CHROME_BINARY` is only needed for Pull Data. `--file` is optional and defaults to `data/applicant_data.json`; when set, both Pull Data (what it writes to and loads from) and Update Analysis (what it re-syncs) use that file instead - for example, pointing at `data/llm_extend_applicant_data.json` to keep the LLM-standardized fields flowing through Update Analysis.
 
@@ -137,7 +138,7 @@ A plain urllib scrape returns HTTP 403, and a normal Selenium-launched Chrome fa
 Every function listed is public (no leading underscore).
 
 ### `paths.py`
-- `DATA_DIR`, `STATE_DIR`, `SCRAPE_SCRIPT`, `DEFAULT_DATA_FILE`, `DEFAULT_LLM_DATA_FILE` - Constants resolved from this file's own location, so they hold regardless of the current working directory.
+- `PACKAGE_DIR`, `DATA_DIR`, `STATE_DIR`, `DEFAULT_DATA_FILE`, `DEFAULT_LLM_DATA_FILE` - Constants resolved from this file's own location, so they hold regardless of the current working directory. `PACKAGE_DIR` is `src/`, the working directory for background subprocesses.
 - `state_path_for(data_filepath)` - Returns the sidecar state-file path in `STATE_DIR` matching a data file's basename, creating `STATE_DIR` if needed.
 
 ### `scraping/scrape.py`
@@ -191,10 +192,10 @@ Holds `QUESTION_QUERY`, the list of (question, SQL, format_result) tuples for th
 Tracks the single background pull `run.py` may have running, guarded by a lock.
 - `kill_stale_chrome()` - Kills any process left listening on Chrome's remote debugging port from an earlier ungraceful exit.
 - `is_running()` / `recent_lines()` - Whether a pull (scrape or its upload) is active, and its last five status lines.
-- `start(chrome_binary, credentials)` - Starts `scrape.py` in pull mode if none is running, streams its output into `recent_lines()`, and loads results into PostgreSQL once it exits.
+- `start(chrome_binary, database_url)` - Starts `python -m scraping.scrape` in pull mode (from `src/`) if none is running, streams its output into `recent_lines()`, and loads results into PostgreSQL once it exits.
 - `cancel()` - Sends SIGTERM to the running subprocess if still scraping; the upload step still runs on whatever was collected.
 
-There is no `main.py`; `scrape.py`, `load_data.py`, `query_data.py`, and `run.py` each define their own `parse_args()` (or, for `run.py`, take no arguments) and run when executed directly.
+There is no `main.py`; `scrape.py`, `load_data.py`, `query_data.py`, and `run.py` each define their own `parse_args()` (or, for `query_data.py`, take no arguments) and run when executed as described in [CLI Usage](#3-cli-usage).
 
 ## 6. Loading Into PostgreSQL
 
@@ -288,17 +289,16 @@ rows = session.execute(
 
 ## 8. Local LLM Standardization
 
-Adds `llm-generated-program` / `llm-generated-university` to every row via a self-hosted TinyLlama model, leaving the original `program` field intact. From `module_4`:
+Adds `llm-generated-program` / `llm-generated-university` to every row via a self-hosted TinyLlama model, leaving the original `program` field intact. From `module_5/src`:
 
 ```
-cd src/llm_hosting && pip install -r requirements.txt
-python app.py --file ../../../data/applicant_data.json --out ../../../data/llm_extend_applicant_data.json --parallel --n_workers 10 --n_threads 1
+python -m llm_hosting.app --file ../data/applicant_data.json --out ../data/llm_extend_applicant_data.json --parallel --n_workers 10 --n_threads 1
 ```
 
-`--n_workers 10` is tuned for a 14-core machine (higher caused CPU oversubscription, see below); lower it on a machine with fewer cores. Progress can be checked while running via `wc -l chunk_*.jsonl` inside `llm_hosting/`.
+`--n_workers 10` is tuned for a 14-core machine (higher caused CPU oversubscription, see below); lower it on a machine with fewer cores. Progress can be checked while running via `wc -l chunk_*.jsonl` inside `llm_hosting/.llm_state/`.
 
 ### Changes made on top of the provided `app.py`
-- **Parallelization** (new file `llm_helper.py`): the provided CLI processed rows one at a time. `split_and_run()` splits the input into `--n_workers` chunks, runs `app.py` on each in its own subprocess, and merges the JSONL outputs into one JSON array, still as a single CLI command via new `--parallel`/`--n_workers`/`--n_threads` flags.
+- **Parallelization** (new file `llm_helper.py`): the provided CLI processed rows one at a time. `run_parallel()` splits the input into `--n_workers` chunks, runs a `python -m llm_hosting.app` worker on each in its own subprocess, and merges the JSONL outputs into one JSON array, still as a single CLI command via new `--parallel`/`--n_workers`/`--n_threads` flags. `llm_helper.py` also owns `get_model_path()`, so `app.py` imports from it and the two files never import each other.
 - **Fixed a model-download race**: every worker independently downloaded the same ~669MB model file at once, corrupting it. Fixed by downloading once up front and checking for an existing file before ever calling the Hub downloader.
 - **Fixed CPU oversubscription**: `--n_threads=1` alone didn't stop one worker from using 540% CPU, since llama.cpp's BLAS backend (Accelerate/vecLib on macOS) ignores that setting. Fixed by also setting `VECLIB_MAXIMUM_THREADS`, `OMP_NUM_THREADS`, and `OPENBLAS_NUM_THREADS` to 1 per worker.
 - **Added resumability and failure visibility**: a chunk with partial output resumes instead of reprocessing, and a worker that exits non-zero is now reported by name instead of silently contributing nothing.
@@ -319,7 +319,23 @@ GradCafe's robots.txt was reviewed manually before writing any scraping code and
 - `storage.py`'s `save_data()` assumes the file it's appending to ends in exactly the bytes it last wrote; a file edited by hand or another tool afterward could break that assumption.
 - If `run.py` is restarted mid-pull, `pull_control`'s in-memory state is lost and the page shows Pull Data as idle even though the old Chrome process may still be running. Restart cleans up that orphaned Chrome process first, so only the tracking of that run is lost.
 
-## 11. Testing
+## 11. Linting (Pylint)
+
+Every Python file under `src/` scores 10.00/10 with Pylint's default settings, with no errors or warnings. Code outside `src/` (tests, docs) is not linted. From `module_5`, with the virtual environment active:
+
+```
+pylint src --recursive=y
+```
+
+`--recursive=y` finds every module under `src/` without needing `src/` itself to be a package. Adding `--fail-under=10` makes the command exit non-zero below a perfect score, which is how CI enforces it. The same command works from the repository root as `pylint module_5/src --recursive=y`.
+
+A few inline `# pylint: disable=...` comments remain, each on a single line with a comment explaining why:
+
+- `not-callable` for SQLAlchemy's `func.count` and Selenium's `webdriver.Chrome`, which are built at runtime where static analysis can't see them.
+- `consider-using-with` where a subprocess or file must outlive the function that opens it (the Pull Data scraper, Chrome, the LLM workers, and the standardizer's output file, which the caller's own `with` block closes).
+- `too-few-public-methods` on the SQLAlchemy model classes, which declare columns rather than methods.
+
+## 12. Testing
 
 ### Setup
 
@@ -351,13 +367,13 @@ This same command runs automatically in GitHub Actions on every push, against it
 
 ### Notes on test design
 
-- `llm_hosting/app.py` and `llm_hosting/llm_helper.py` are loaded via `importlib` under names other than `app` (e.g. `llm_app`), since a bare `import app` would resolve to the already-imported Flask `app` package from `src/app/` instead (whichever module claims the name `app` in `sys.modules` first wins, for the rest of the process). `llm_helper.run_parallel()`'s own lazy `from app import _get_model_path` is satisfied in tests by temporarily inserting a fake module into `sys.modules["app"]`.
+- `llm_hosting/app.py` and `llm_hosting/llm_helper.py` are imported by their full package names (`import llm_hosting.app as llm_app`), which never collide with the Flask `app` package in `src/app/`. `run_parallel()`'s model download is replaced in tests by monkeypatching `llm_helper.get_model_path`.
 - Database tests use a real local PostgreSQL connection (`cam_db_test`), not a mocked one, so schema/constraint behavior (`NOT NULL`, `UNIQUE`, upsert-on-conflict) is verified for real rather than assumed.
 - Selenium, subprocess, and `urllib` calls in `scraping/scrape.py` are mocked at the point of use in every test; no test here ever launches a real Chrome instance or makes a real HTTP request.
 - The Pull Data and Update Analysis buttons carry `data-testid="pull-data-btn"` / `data-testid="update-analysis-btn"` attributes (alongside the `id` attributes the page's own JS uses), so UI tests have a stable selector that doesn't break if the visible button text or styling changes.
 - Structural page assertions (button presence, "Answer:" labeling) parse the rendered HTML with BeautifulSoup and query by selector (`data-testid`, `.answer`) rather than searching the raw response body for substrings, so a test doesn't pass or fail based on incidental whitespace or unrelated text elsewhere on the page. Percentage-formatting assertions use a regex instead, since a percentage is a text value, not a structural element.
 
-## 12. Documentation
+## 13. Documentation
 
 Sphinx documentation (`docs/source/`) covers an overview and setup guide, an
 architecture description of the web/ETL/DB layers, autodoc API reference
@@ -378,7 +394,7 @@ open docs/build/index.html        # Linux: xdg-open docs/build/index.html
 
 [cela-jh-jhu-software-concepts.readthedocs.io](https://cela-jh-jhu-software-concepts.readthedocs.io/en/latest/)
 
-## 13. Citations
+## 14. Citations
 
 ### CLAUDE
 

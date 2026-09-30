@@ -24,7 +24,7 @@ class _FakeProcess:
 
 
 class _FakeThread:
-    """A pull_control._thread stand-in that reports as still running, for
+    """A pull_control._state.thread stand-in that reports as still running, for
     busy-gating tests that don't need a real background thread."""
 
     def is_alive(self):
@@ -32,7 +32,7 @@ class _FakeThread:
 
 
 def _mark_pull_running():
-    pull_control._thread = _FakeThread()
+    pull_control._state.thread = _FakeThread()
 
 
 @pytest.mark.buttons
@@ -61,7 +61,7 @@ def test_pull_start_returns_200_and_triggers_loader(client, monkeypatch, databas
 
     # The upload happens on a background thread; wait for it to finish
     # before checking that it ran.
-    pull_control._thread.join(timeout=2)
+    pull_control._state.thread.join(timeout=2)
 
     assert len(load_calls) == 1
     loaded_filepath, loaded_url = load_calls[0]
@@ -84,7 +84,7 @@ def test_pull_reports_error_when_scraper_exits_nonzero(client, monkeypatch):
     monkeypatch.setattr("app.pull_control.load_data", lambda filepath, url: True)
 
     client.post("/pull-data")
-    pull_control._thread.join(timeout=2)
+    pull_control._state.thread.join(timeout=2)
 
     lines = pull_control.recent_lines()
     assert any("Scraper exited with an error (code 1)" in line for line in lines)
@@ -104,7 +104,7 @@ def test_pull_reports_error_when_upload_fails(client, monkeypatch):
     monkeypatch.setattr("app.pull_control.load_data", lambda filepath, url: False)
 
     client.post("/pull-data")
-    pull_control._thread.join(timeout=2)
+    pull_control._state.thread.join(timeout=2)
 
     lines = pull_control.recent_lines()
     assert any("Pull finished with errors: the database upload failed." in line for line in lines)

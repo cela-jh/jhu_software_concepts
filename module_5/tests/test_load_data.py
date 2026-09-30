@@ -17,7 +17,8 @@ import pytest
 import database.load_data as load_data
 from helpers import fake_applicant_row
 
-LOAD_DATA_SCRIPT = Path(load_data.__file__).resolve()
+# load_data runs as a package module, so the CLI is started from src/.
+SRC_DIR = Path(load_data.__file__).resolve().parent.parent
 
 
 @pytest.mark.db
@@ -221,12 +222,58 @@ def test_cli_exits_nonzero_when_database_unreachable(tmp_path):
     data_file.write_text(json.dumps([fake_applicant_row(9999999)]))
 
     result = subprocess.run(
-        [sys.executable, str(LOAD_DATA_SCRIPT), str(data_file)],
+        [sys.executable, "-m", "database.load_data", str(data_file)],
         env={
             **os.environ,
             "DATABASE_URL": "postgresql://localhost:5432/definitely_not_a_real_database",
         },
-        capture_output=True, text=True,
+        cwd=SRC_DIR, capture_output=True, text=True, check=False,
     )
 
     assert result.returncode != 0
+    # the failure must come from the database, not from the module
+    # failing to import
+    assert "Could not connect to the database" in result.stdout
+
+
+@pytest.fixture
+def cli_data_file(tmp_path, monkeypatch):
+    """A real results file passed to main() through sys.argv."""
+    data_file = tmp_path / "applicant_data.json"
+    data_file.write_text(json.dumps([fake_applicant_row(9999998)]))
+    monkeypatch.setattr("sys.argv", ["load_data.py", str(data_file)])
+    return data_file
+
+
+@pytest.mark.db
+def test_main_exits_nonzero_when_database_url_unset(cli_data_file, monkeypatch, capsys):
+    monkeypatch.delenv("DATABASE_URL", raising=False)
+
+    with pytest.raises(SystemExit) as exit_info:
+        load_data.main()
+
+    assert exit_info.value.code == 1
+    assert "DATABASE_URL" in capsys.readouterr().out
+
+
+@pytest.mark.db
+def test_main_exits_nonzero_when_load_fails(cli_data_file, monkeypatch):
+    monkeypatch.setenv("DATABASE_URL", "postgresql://unused")
+    monkeypatch.setattr(load_data, "load_data", lambda filepath, url: False)
+
+    with pytest.raises(SystemExit) as exit_info:
+        load_data.main()
+
+    assert exit_info.value.code == 1
+
+
+@pytest.mark.db
+def test_main_returns_normally_when_load_succeeds(cli_data_file, monkeypatch):
+    monkeypatch.setenv("DATABASE_URL", "postgresql://unused")
+    load_calls = []
+    monkeypatch.setattr(load_data, "load_data",
+                        lambda filepath, url: load_calls.append((filepath, url)) or True)
+
+    load_data.main()
+
+    assert load_calls == [(cli_data_file, "postgresql://unused")]

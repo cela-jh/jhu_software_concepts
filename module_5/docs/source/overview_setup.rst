@@ -68,9 +68,11 @@ Setup
 Running the app
 ----------------
 
+Every command in this section and the next runs from ``module_5/src``.
+
 .. code-block:: console
 
-   DATABASE_URL=postgresql://youruser:yourpassword@localhost:5432/yourdb CHROME_BINARY="<path to Chrome>" python src/run.py [--file path/to/results.json]
+   DATABASE_URL=postgresql://youruser:yourpassword@localhost:5432/yourdb CHROME_BINARY="<path to Chrome>" python run.py [--file path/to/results.json]
 
 Open http://127.0.0.1:5000/analysis. Every answer is read live from
 PostgreSQL on each page load; if PostgreSQL itself is unreachable, the
@@ -81,19 +83,22 @@ page shows a plain "database is currently unavailable" message (HTTP
 Running the other CLI scripts
 ------------------------------
 
+Scripts inside a package run as modules (``python -m package.module``) so
+their package imports resolve from ``src/``.
+
 .. code-block:: console
 
    # Scraping
-   python src/scraping/scrape.py --num_results <N> --chrome_binary "<path to Chrome>" [output.json]
+   python -m scraping.scrape --num_results <N> --chrome_binary "<path to Chrome>" [output.json]
 
    # Loading into PostgreSQL
-   DATABASE_URL=postgresql://youruser:yourpassword@localhost:5432/yourdb python src/database/load_data.py <file.json>
+   DATABASE_URL=postgresql://youruser:yourpassword@localhost:5432/yourdb python -m database.load_data <file.json>
 
    # Part 2 SQL analysis
-   DATABASE_URL=postgresql://youruser:yourpassword@localhost:5432/yourdb python src/database/query_data.py
+   DATABASE_URL=postgresql://youruser:yourpassword@localhost:5432/yourdb python -m database.query_data
 
    # Part 6 SQLAlchemy ORM analysis
-   DATABASE_URL=postgresql://youruser:yourpassword@localhost:5432/yourdb python src/database/orm_queries.py
+   DATABASE_URL=postgresql://youruser:yourpassword@localhost:5432/yourdb python -m database.orm_queries
 
 Running the tests
 ------------------

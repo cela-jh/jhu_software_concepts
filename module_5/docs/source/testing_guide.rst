@@ -120,9 +120,9 @@ Notes on test design
   ``UNIQUE``, upsert-on-conflict) is verified for real rather than assumed.
 - Selenium, subprocess, and ``urllib`` calls in ``scraping/scrape.py``
   are mocked at the point of use in every test.
-- ``llm_hosting/app.py`` and ``llm_hosting/llm_helper.py`` are loaded via
-  ``importlib`` under names other than ``app``, since a bare ``import app``
-  would resolve to the already-imported Flask ``app`` package instead.
+- ``llm_hosting/app.py`` and ``llm_hosting/llm_helper.py`` are imported
+  by their full package names (``import llm_hosting.app as llm_app``),
+  which never collide with the Flask ``app`` package.
 - Structural page assertions (button presence, "Answer:" labeling) parse
   the rendered HTML with BeautifulSoup and query by selector
   (``data-testid``, ``.answer``) rather than searching the raw response

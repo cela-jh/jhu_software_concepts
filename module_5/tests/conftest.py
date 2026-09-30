@@ -55,8 +55,8 @@ def client(app):
 
 def _reset_pull_control_state():
     with pull_control._lock:
-        pull_control._process = None
-        pull_control._thread = None
+        pull_control._state.process = None
+        pull_control._state.thread = None
         pull_control._lines.clear()
 
 

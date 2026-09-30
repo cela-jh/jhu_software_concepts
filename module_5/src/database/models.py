@@ -10,11 +10,13 @@ from sqlalchemy.engine import make_url
 from sqlalchemy.orm import DeclarativeBase, Mapped, Session, mapped_column
 
 
-class Base(DeclarativeBase):
+# ORM model classes declare mapped columns rather than methods, so the
+# public method count check does not apply to them.
+class Base(DeclarativeBase):  # pylint: disable=too-few-public-methods
     """Declarative base class for every ORM model in this project."""
 
 
-class Applicant(Base):
+class Applicant(Base):  # pylint: disable=too-few-public-methods
     """ORM model for a single row of the `applicants` table."""
 
     __tablename__ = "applicants"

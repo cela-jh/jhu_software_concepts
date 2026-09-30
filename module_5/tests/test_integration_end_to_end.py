@@ -29,7 +29,7 @@ def _start_pull(client, monkeypatch, data_file):
     monkeypatch.setenv("CHROME_BINARY", "/fake/chrome")
 
     response = client.post("/pull-data")
-    pull_control._thread.join(timeout=5)
+    pull_control._state.thread.join(timeout=5)
     return response
 
 

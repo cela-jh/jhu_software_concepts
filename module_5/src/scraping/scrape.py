@@ -1,11 +1,11 @@
 """
 `scrape.py`
-Scrapes admissions results from GradCafe into a JSON file. Run directly
-(`python scrape.py [options] [output.json]`) to scrape; `scrape_data` and
-the other functions here can also be imported on their own.
+Scrapes admissions results from GradCafe into a JSON file. Run from src/
+as a module (`python -m scraping.scrape [options] [output.json]`) to
+scrape; `scrape_data` and the other functions here can also be imported
+on their own.
 """
 import argparse
-import functools
 import signal
 import sys
 import time
@@ -13,6 +13,7 @@ import random
 import tempfile
 import shutil
 import subprocess
+from dataclasses import dataclass
 from pathlib import Path
 from urllib.request import urlopen, Request
 from urllib.error import HTTPError, URLError
@@ -20,38 +21,115 @@ from urllib.parse import urljoin, urlparse
 from urllib.robotparser import RobotFileParser
 from selenium import webdriver
 from selenium.webdriver.common.by import By
-from selenium.common.exceptions import NoSuchElementException
+from selenium.common.exceptions import NoSuchElementException, WebDriverException
 from bs4 import BeautifulSoup
 
-# Ensures clean/storage resolve whether scrape.py is run directly or
-# imported as scraping.scrape from elsewhere in the package.
-sys.path.insert(0, str(Path(__file__).resolve().parent))
-from clean import clean_data
-from storage import save_data, validate_filepath, save_state, load_state, load_existing_urls
-
-# paths.py is a sibling of scraping/, directly under src/.
-sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 from paths import DEFAULT_DATA_FILE, state_path_for
-
-# Force every print() in this process to flush immediately for logging purposes.
-# Helps prevent making a script that is working look hung.
-print = functools.partial(print, flush=True)
+from scraping.clean import clean_data
+from scraping.storage import (
+    save_data, validate_filepath, save_state, load_state, load_existing_urls,
+)
 
 RESTART_EVERY_N_PAGES = 500
 PULL_SEEN_LIMIT = 1000
+RESULTS_PER_PAGE = 20
+
+ADMISSIONS_URL = "https://www.thegradcafe.com/survey"
+CHROME_DEBUG_PORT = 9222
+CHROME_DEBUG_HOST_PORT = f"127.0.0.1:{CHROME_DEBUG_PORT}"
+NEXT_LINK_XPATH = (
+    '//nav[@aria-label="Results pagination"]'
+    '//a[normalize-space(text())="Next"]'
+)
 
 
 class StopRequested(BaseException):
     """
     Raised when a SIGTERM asks a running scrape to stop cleanly. A
-    BaseException rather than an Exception, like KeyboardInterrupt, so it
-    isn't swallowed by the broad except-Exception retry loops throughout
-    this file.
+    BaseException rather than an Exception, like KeyboardInterrupt, so no
+    retry loop in this file ever mistakes it for a recoverable page error.
     """
 
 
+class ResultsTableMissing(RuntimeError):
+    """Raised when a loaded page has no results table to scrape."""
+
+
+# Errors a page load or click can recover from on a later attempt:
+# Selenium command failures, a page without its results table yet, and
+# socket level problems reaching the browser.
+RETRYABLE_ERRORS = (WebDriverException, ResultsTableMissing, OSError)
+
+
+@dataclass(frozen=True)
+class RetryPolicy:
+    """
+    How many times to attempt an action and how long to wait between
+    attempts. The wait starts at base_delay seconds and doubles after
+    each failed attempt.
+    """
+    attempts: int
+    base_delay: float
+
+    def delay(self, attempt):
+        """
+        Seconds to wait after the given failed attempt.
+
+        :param attempt: The 1-based number of the attempt that failed.
+        :type attempt: int
+        :returns: The backoff delay in seconds.
+        :rtype: float
+        """
+        return self.base_delay * (2 ** (attempt - 1))
+
+
+DEFAULT_RETRY = RetryPolicy(attempts=5, base_delay=15)
+MISSING_LINK_RETRY = RetryPolicy(attempts=3, base_delay=5)
+
+
 def _handle_sigterm(signum, frame):
+    """
+    SIGTERM handler that turns the signal into a StopRequested exception.
+
+    :param signum: The received signal number (unused).
+    :param frame: The interrupted stack frame (unused).
+    :raises StopRequested: Always.
+    """
     raise StopRequested()
+
+
+def _with_retries(action, retry, label, on_retry=None):
+    """
+    Call action until it succeeds, retrying RETRYABLE_ERRORS with an
+    exponential backoff and re-raising the last error once every attempt
+    is used up.
+
+    :param action: Zero-argument callable to attempt.
+    :type action: Callable
+    :param retry: How many attempts to make and how long to wait.
+    :type retry: RetryPolicy
+    :param label: Name of the action for the printed failure message.
+    :type label: str
+    :param on_retry: Optional zero-argument callable run after each
+        backoff wait and before the next attempt.
+    :type on_retry: Callable or None
+    :returns: Whatever action returns.
+    :rtype: object
+    """
+    attempt = 1
+    while True:
+        try:
+            return action()
+        except RETRYABLE_ERRORS as error:
+            print(f"{label} failed (attempt {attempt}/{retry.attempts}): {error}")
+            if attempt == retry.attempts:
+                raise
+            delay = retry.delay(attempt)
+            print(f"Retrying in {delay}s...")
+            time.sleep(delay)
+            if on_retry is not None:
+                on_retry()
+            attempt += 1
 
 
 def create_profile_dir():
@@ -76,10 +154,12 @@ def _open_chrome(chrome_bin, profile_dir):
     :returns: The Chrome process.
     :rtype: subprocess.Popen
     """
-    chrome_process = subprocess.Popen(
+    # Chrome must outlive this function; the caller stops it later with
+    # terminate_process(), so a with block cannot own it here.
+    chrome_process = subprocess.Popen(  # pylint: disable=consider-using-with
         [
             chrome_bin,
-            "--remote-debugging-port=9222",
+            f"--remote-debugging-port={CHROME_DEBUG_PORT}",
             f"--user-data-dir={profile_dir}",
             "--no-first-run",
             "--no-default-browser-check",
@@ -105,8 +185,8 @@ def _try_debug_endpoint(host_port, retries=10):
     """
     for _ in range(retries):
         try:
-            urlopen(urljoin(host_port, "json"), timeout=10)
-            break
+            with urlopen(urljoin(host_port, "json"), timeout=10):
+                break
         except URLError:
             time.sleep(1)
 
@@ -126,7 +206,9 @@ def _init_webdriver(host_port):
     options.add_experimental_option("prefs", {
         "profile.managed_default_content_settings.images": 2
     })
-    driver = webdriver.Chrome(options=options)
+    # selenium exposes webdriver.Chrome through a lazy module attribute
+    # that static analysis cannot resolve as a class.
+    driver = webdriver.Chrome(options=options)  # pylint: disable=not-callable
 
     return driver
 
@@ -169,7 +251,8 @@ CLOUDFLARE_WAIT_TIMEOUT = 300
 CLOUDFLARE_POLL_INTERVAL = 3
 
 
-def _wait_for_cloudflare(driver, timeout=CLOUDFLARE_WAIT_TIMEOUT, poll_interval=CLOUDFLARE_POLL_INTERVAL):
+def _wait_for_cloudflare(driver, timeout=CLOUDFLARE_WAIT_TIMEOUT,
+                         poll_interval=CLOUDFLARE_POLL_INTERVAL):
     """
     Wait for a human to clear Cloudflare's challenge in the visible
     Chrome window, polling the page title instead of blocking on
@@ -239,7 +322,7 @@ def _block_ad_trackers(driver):
     driver.execute_cdp_cmd("Network.setBlockedURLs", {"urls": AD_TRACKER_URL_PATTERNS})
 
 
-def chrome_helper(url, host_port, chrome_bin, profile_dir, retries=5, base_retry_delay=15):
+def chrome_helper(url, host_port, chrome_bin, profile_dir, retry=DEFAULT_RETRY):
     """
     Work around Cloudflare verification at url (GradCafe), using a
     persistent Chrome profile so a cleared session survives restarts.
@@ -256,37 +339,25 @@ def chrome_helper(url, host_port, chrome_bin, profile_dir, retries=5, base_retry
     :type chrome_bin: str or pathlib.Path
     :param profile_dir: Path to the Chrome profile directory to use.
     :type profile_dir: str
-    :param retries: How many times to retry the initial navigation.
-    :type retries: int
-    :param base_retry_delay: Base delay in seconds between retries,
-        doubled on each subsequent attempt.
-    :type base_retry_delay: int
+    :param retry: Attempts and backoff for the initial navigation.
+    :type retry: RetryPolicy
     :returns: The resulting driver and Chrome process.
     :rtype: tuple(selenium.webdriver.Chrome, subprocess.Popen)
     """
     chrome_process = _open_chrome(chrome_bin, profile_dir)
     try:
-        http_host = "http://" + host_port
-        _try_debug_endpoint(http_host)
+        _try_debug_endpoint("http://" + host_port)
         driver = _init_webdriver(host_port)
         _block_ad_trackers(driver)
 
         print("Loading GradCafe...")
-        for attempt in range(1, retries + 1):
-            try:
-                driver.get(url)
-                break
-            except Exception as e:
-                print(f"Initial page load failed (attempt {attempt}/{retries}): {e}")
-                if attempt == retries:
-                    raise
-                retry_delay = base_retry_delay * (2 ** (attempt - 1))
-                print(f"Retrying in {retry_delay}s...")
-                time.sleep(retry_delay)
+        _with_retries(lambda: driver.get(url), retry, "Initial page load")
 
         if "Just a moment" in driver.title:
             _wait_for_cloudflare(driver)
     except Exception:
+        # any failure leaves a half-started browser behind, so stop it
+        # before passing the error up
         terminate_process(chrome_process)
         raise
 
@@ -322,7 +393,28 @@ def check_robots_allowed(url, user_agent="*"):
     return robots_parser.can_fetch(user_agent, url)
 
 
-def _get_page(driver, url=None, wait=2, retries=5, base_retry_delay=15):
+def _load_results_page(driver, url):
+    """
+    Navigate to url (or keep the current page when url is None) and
+    parse it, requiring the results table to be present.
+
+    :param driver: The active Selenium Chrome driver.
+    :type driver: selenium.webdriver.Chrome
+    :param url: The URL to navigate to, or None to use the current page.
+    :type url: str or None
+    :raises ResultsTableMissing: If the page has no results table.
+    :returns: The parsed page.
+    :rtype: bs4.BeautifulSoup
+    """
+    if url is not None:
+        driver.get(url)
+    soup = BeautifulSoup(driver.page_source, "html.parser")
+    if soup.find("tbody") is None:
+        raise ResultsTableMissing(f"Results table not found (page title: '{driver.title}').")
+    return soup
+
+
+def _get_page(driver, url=None, wait=2, retry=DEFAULT_RETRY):
     """
     Load a page either by navigating to `url` directly, or, if url is
     None, by using whatever page is currently loaded (like after
@@ -337,44 +429,56 @@ def _get_page(driver, url=None, wait=2, retries=5, base_retry_delay=15):
     :type url: str or None
     :param wait: Base seconds to politely wait after a successful load.
     :type wait: float
-    :param retries: How many times to retry on failure.
-    :type retries: int
-    :param base_retry_delay: Base delay in seconds between retries,
-        doubled on each subsequent attempt.
-    :type base_retry_delay: int
+    :param retry: Attempts and backoff for loading the page.
+    :type retry: RetryPolicy
     :returns: The parsed page.
     :rtype: bs4.BeautifulSoup
     """
-    soup = None
-    for attempt in range(1, retries + 1):
-        try:
-            if url is not None:
-                driver.get(url)
-            candidate = BeautifulSoup(driver.page_source, "html.parser")
-            if candidate.find("tbody") is None:
-                raise RuntimeError(f"Results table not found (page title: '{driver.title}').")
-            soup = candidate
-            break
-        except HTTPError as e:
-            print("HTTP Error:", e.code)
-            sys.exit(1)
-        except Exception as e:
-            print(f"Page load failed (attempt {attempt}/{retries}): {e}")
-            if attempt == retries:
-                raise
-            retry_delay = base_retry_delay * (2 ** (attempt - 1))
-            print(f"Retrying in {retry_delay}s...")
-            time.sleep(retry_delay)
-            if url is None:
-                driver.refresh()
+    # re-navigating to url repeats the load itself; with no url, the
+    # current page is refreshed instead
+    on_retry = driver.refresh if url is None else None
+    try:
+        soup = _with_retries(
+            lambda: _load_results_page(driver, url), retry, "Page load", on_retry
+        )
+    except HTTPError as e:
+        print("HTTP Error:", e.code)
+        sys.exit(1)
 
     time.sleep(random.uniform(wait * 0.7, wait * 1.3))    #  add polite, jittered polling time
 
     return soup
 
 
-def _click_next_page(driver, retries=5, base_retry_delay=15,
-                      missing_link_retries=3, missing_link_delay=5):
+def _find_next_link(driver, missing_link_retry):
+    """
+    Find the "Next" pagination link, refreshing and re-checking with a
+    growing delay if it is not there yet in case the page is still
+    loading.
+
+    :param driver: The active Selenium Chrome driver.
+    :type driver: selenium.webdriver.Chrome
+    :param missing_link_retry: Checks and backoff for a missing link.
+    :type missing_link_retry: RetryPolicy
+    :returns: The link element, or None once every check came up empty.
+    :rtype: selenium.webdriver.remote.webelement.WebElement or None
+    """
+    check = 1
+    while True:
+        try:
+            return driver.find_element(By.XPATH, NEXT_LINK_XPATH)
+        except NoSuchElementException:
+            if check == missing_link_retry.attempts:
+                return None
+            delay = missing_link_retry.delay(check)
+            print(f"'Next' link not found (check {check}/{missing_link_retry.attempts}); "
+                  f"refreshing and re-checking in {delay}s before assuming no more pages...")
+            driver.refresh()
+            time.sleep(delay)
+            check += 1
+
+
+def _click_next_page(driver, retry=DEFAULT_RETRY, missing_link_retry=MISSING_LINK_RETRY):
     """
     Find and click the "Next" pagination link via JavaScript so
     navigation carries a natural Referer header and isn't blocked by
@@ -382,53 +486,26 @@ def _click_next_page(driver, retries=5, base_retry_delay=15,
     click. Retries on transient WebDriver command failures.
 
     Not finding the "Next" link is retried with a short wait and a page
-    refresh up to missing_link_retries times in case the page has not
-    loaded yet.
+    refresh in case the page has not loaded yet.
 
     :param driver: The active Selenium Chrome driver.
     :type driver: selenium.webdriver.Chrome
-    :param retries: How many times to retry on a WebDriver failure.
-    :type retries: int
-    :param base_retry_delay: Base delay in seconds between retries,
-        doubled on each subsequent attempt.
-    :type base_retry_delay: int
-    :param missing_link_retries: How many times to retry when the
-        "Next" link isn't found yet.
-    :type missing_link_retries: int
-    :param missing_link_delay: Base delay in seconds between missing-
-        link retries, doubled on each subsequent attempt.
-    :type missing_link_delay: int
+    :param retry: Attempts and backoff for WebDriver failures.
+    :type retry: RetryPolicy
+    :param missing_link_retry: Checks and backoff for a missing link.
+    :type missing_link_retry: RetryPolicy
     :returns: The resulting page's URL, or None if no next page exists
-        after exhausting missing_link_retries.
+        after every missing-link check.
     :rtype: str or None
     """
-    for attempt in range(1, retries + 1):
-        try:
-            next_link = None
-            for missing_attempt in range(1, missing_link_retries + 1):
-                try:
-                    next_link = driver.find_element(
-                        By.XPATH, '//nav[@aria-label="Results pagination"]//a[normalize-space(text())="Next"]'
-                    )
-                    break
-                except NoSuchElementException:
-                    if missing_attempt == missing_link_retries:
-                        return None
-                    delay = missing_link_delay * (2 ** (missing_attempt - 1))
-                    print(f"'Next' link not found (check {missing_attempt}/{missing_link_retries}); "
-                          f"refreshing and re-checking in {delay}s before assuming no more pages...")
-                    driver.refresh()
-                    time.sleep(delay)
+    def _find_and_click():
+        next_link = _find_next_link(driver, missing_link_retry)
+        if next_link is None:
+            return None
+        driver.execute_script("arguments[0].click();", next_link)
+        return driver.current_url
 
-            driver.execute_script("arguments[0].click();", next_link)
-            return driver.current_url
-        except Exception as e:
-            print(f"Click 'Next' failed (attempt {attempt}/{retries}): {e}")
-            if attempt == retries:
-                raise
-            retry_delay = base_retry_delay * (2 ** (attempt - 1))
-            print(f"Retrying in {retry_delay}s...")
-            time.sleep(retry_delay)
+    return _with_retries(_find_and_click, retry, "Click 'Next'")
 
 
 def scrape_data(driver, url=None):
@@ -467,9 +544,9 @@ def format_duration(seconds):
     hours, remainder = divmod(int(seconds), 3600)
     minutes, secs = divmod(remainder, 60)
 
-    if minutes == 0 and hours == 0:
+    if hours == 0 and minutes == 0:
         return f"{secs}s"
-    elif minutes > 0 and hours == 0:
+    if hours == 0:
         return f"{minutes}m {secs}s"
 
     return f"{hours}h {minutes}m {round(secs, 0)}s"
@@ -508,6 +585,262 @@ def parse_args():
     return parser.parse_args()
 
 
+@dataclass
+class _ScrapeProgress:
+    """
+    Running totals for one scrape. seen_urls starts as every url already
+    in the output file, which is the source of truth for what to skip.
+    """
+    seen_urls: set
+    result_count: int = 0
+    pages_completed: int = 0
+    consecutive_seen: int = 0
+    start_time: float = 0.0
+
+
+@dataclass
+class _ChromeSession:
+    """
+    The Chrome process and driver used for one scrape. The profile
+    directory is shared across restarts so a cleared Cloudflare session
+    survives them, and is removed only by close().
+    """
+    chrome_binary: Path
+    profile_dir: str
+    driver: object = None
+    process: object = None
+
+    def start(self):
+        """
+        Launch Chrome and load GradCafe through chrome_helper().
+
+        :returns: None.
+        :rtype: None
+        """
+        self.driver, self.process = chrome_helper(
+            ADMISSIONS_URL, CHROME_DEBUG_HOST_PORT, self.chrome_binary, self.profile_dir
+        )
+
+    def restart(self):
+        """
+        Stop the current Chrome process and start a fresh one on the same
+        profile, clearing accumulated browser session state.
+
+        :returns: None.
+        :rtype: None
+        """
+        print("Restarting Chrome to clear accumulated session state...")
+        terminate_process(self.process)
+        self.start()
+
+    def close(self):
+        """
+        Stop Chrome if it was started, then remove the profile directory.
+
+        :returns: None.
+        :rtype: None
+        """
+        if self.process is not None:
+            terminate_process(self.process)
+        cleanup_profile(self.profile_dir)
+
+
+def _check_can_scrape(args):
+    """
+    Confirm the output path, the Chrome binary, and robots.txt all allow
+    a scrape before any browser is started.
+
+    :param args: Parsed CLI arguments, as returned by parse_args().
+    :type args: argparse.Namespace
+    :raises FileNotFoundError: If the Chrome binary does not exist.
+    :raises PermissionError: If robots.txt disallows the results page.
+    :returns: None.
+    :rtype: None
+    """
+    validate_filepath(args.relative_filepath, must_exist=False)
+
+    if not args.chrome_binary.is_file():
+        raise FileNotFoundError(f"'{args.chrome_binary}' is not a valid Chrome binary path.")
+
+    if not check_robots_allowed(ADMISSIONS_URL):
+        raise PermissionError(f"Scraping {ADMISSIONS_URL} is disallowed by robots.txt")
+
+
+def _starting_url(args, result_count, state_path):
+    """
+    Choose the page to start on. Pull mode always starts at page 1;
+    resume mode continues from saved pagination state when there is
+    any.
+
+    :param args: Parsed CLI arguments, as returned by parse_args().
+    :type args: argparse.Namespace
+    :param result_count: Unique results already in the output file.
+    :type result_count: int
+    :param state_path: Path to the sidecar pagination state file.
+    :type state_path: pathlib.Path
+    :returns: The URL to start from, or None if the requested number of
+        results is already met.
+    :rtype: str or None
+    """
+    if args.num_results is None:
+        print(f"Pulling new results from page 1 until {args.pull_seen_limit} "
+              "consecutive already-seen results are found.")
+        return ADMISSIONS_URL
+
+    start_url = ADMISSIONS_URL
+    state = load_state(state_path)
+    if state:
+        start_url = state["next_url"]
+        print(f"Resuming pagination from saved state "
+              f"({result_count} unique results already in file).")
+
+    if result_count >= args.num_results:
+        print(f"Already have {result_count} results "
+              f"(>= requested {args.num_results}); nothing to do.")
+        return None
+    return start_url
+
+
+def _record_page(progress, parsed_results, filepath):
+    """
+    Save the page's results that are not already on disk and update the
+    running totals, including the streak of consecutive already-seen
+    results that ends a pull.
+
+    :param progress: The scrape's running totals, updated in place.
+    :type progress: _ScrapeProgress
+    :param parsed_results: The page's cleaned results.
+    :type parsed_results: list[dict]
+    :param filepath: Path to the JSON output file.
+    :type filepath: pathlib.Path
+    :returns: None.
+    :rtype: None
+    """
+    progress.pages_completed += 1
+    new_results = []
+    for result in parsed_results:
+        if result.get("url") in progress.seen_urls:
+            progress.consecutive_seen += 1
+        else:
+            progress.consecutive_seen = 0
+            new_results.append(result)
+    progress.seen_urls.update(r["url"] for r in new_results if r.get("url"))
+    progress.result_count += len(new_results)
+
+    if new_results:
+        save_data(new_results, filepath)
+
+    # printed for every page whether data was written or not, so read
+    # pages are always visible even when they add nothing new
+    print(
+        f"Page {progress.pages_completed}: read {len(parsed_results)}, "
+        f"{len(new_results)} new ({progress.result_count} total unique so far)"
+    )
+
+
+def _print_eta(num_results, progress):
+    """
+    Print the running total with an estimate of the time left to reach
+    num_results, based on the average time per page so far.
+
+    :param num_results: The requested total number of results.
+    :type num_results: int
+    :param progress: The scrape's running totals.
+    :type progress: _ScrapeProgress
+    :returns: None.
+    :rtype: None
+    """
+    avg_loop_time = (time.time() - progress.start_time) / progress.pages_completed
+    remaining_results = num_results - progress.result_count
+    remaining_pages = -(-remaining_results // RESULTS_PER_PAGE)  # ceiling division
+    eta_seconds = remaining_pages * avg_loop_time
+    print(f"Running total: {progress.result_count} (ETA: {format_duration(eta_seconds)})")
+
+
+def _should_stop(args, progress, next_page_url, state_path):
+    """
+    Decide whether the scrape is done after a page, printing why, and in
+    resume mode save pagination state so a later run can continue here.
+
+    :param args: Parsed CLI arguments, as returned by parse_args().
+    :type args: argparse.Namespace
+    :param progress: The scrape's running totals.
+    :type progress: _ScrapeProgress
+    :param next_page_url: The next page's URL, or None on the last page.
+    :type next_page_url: str or None
+    :param state_path: Path to the sidecar pagination state file.
+    :type state_path: pathlib.Path
+    :returns: True if the scrape should stop.
+    :rtype: bool
+    """
+    pull_mode = args.num_results is None
+
+    if pull_mode and progress.consecutive_seen >= args.pull_seen_limit:
+        print(f"Reached {progress.consecutive_seen} consecutive already-seen results; stopping.")
+        return True
+
+    if next_page_url is None:
+        print(f"No additional pages available. Stopping at {progress.result_count} results.")
+        if not pull_mode:
+            state_path.unlink(missing_ok=True)
+        return True
+
+    if pull_mode:
+        print(f"Running total: {progress.result_count}, "
+              f"{progress.consecutive_seen} consecutive already-seen")
+        return False
+
+    # save pagination state even after reaching quota so later runs
+    # asking for more results resume near here instead of restarting
+    # the crawl from page 1
+    save_state({"next_url": next_page_url}, state_path)
+
+    if progress.result_count >= args.num_results:
+        print(f"Scraping finished with {progress.result_count} results.")
+        return True
+
+    _print_eta(args.num_results, progress)
+    return False
+
+
+def _scrape_pages(args, chrome, progress, current_url, state_path):
+    """
+    Scrape page after page until _should_stop() says the scrape is done,
+    restarting Chrome every RESTART_EVERY_N_PAGES pages.
+
+    :param args: Parsed CLI arguments, as returned by parse_args().
+    :type args: argparse.Namespace
+    :param chrome: The started Chrome session.
+    :type chrome: _ChromeSession
+    :param progress: The scrape's running totals, updated in place.
+    :type progress: _ScrapeProgress
+    :param current_url: The first page's URL.
+    :type current_url: str
+    :param state_path: Path to the sidecar pagination state file.
+    :type state_path: pathlib.Path
+    :returns: None.
+    :rtype: None
+    """
+    # the first page (fresh or resumed) needs an explicit URL navigation;
+    # later pages are reached by clicking "Next" inside scrape_data
+    navigate_by_url = True
+    while True:
+        raw_results, next_page_url = scrape_data(
+            chrome.driver, current_url if navigate_by_url else None
+        )
+        navigate_by_url = False
+        _record_page(progress, clean_data(raw_results, current_url), args.relative_filepath)
+
+        if _should_stop(args, progress, next_page_url, state_path):
+            return
+        current_url = next_page_url
+
+        # periodic restart to clear accumulated browser session state
+        if progress.pages_completed % RESTART_EVERY_N_PAGES == 0:
+            chrome.restart()
+            navigate_by_url = True
+
+
 def run_scrape(args):
     """
     Scrape GradCafe admissions results into a JSON file.
@@ -530,135 +863,31 @@ def run_scrape(args):
     :rtype: None
     """
     signal.signal(signal.SIGTERM, _handle_sigterm)
+    _check_can_scrape(args)
 
-    validate_filepath(args.relative_filepath, must_exist=False)
-
-    if not args.chrome_binary.is_file():
-        raise FileNotFoundError(f"'{args.chrome_binary}' is not a valid Chrome binary path.")
-
-    admissions_url = "https://www.thegradcafe.com/survey"
-    if not check_robots_allowed(admissions_url):
-        raise PermissionError(f"Scraping {admissions_url} is disallowed by robots.txt")
-
-    pull_mode = args.num_results is None
-
-    # urls already on disk are the source of truth for how many unique
-    # results exist and which ones to skip - this makes growing an
-    # already-complete file safe even if the pagination state below is
-    # stale, missing, or points back at page 1
     seen_urls = load_existing_urls(args.relative_filepath)
-    result_count = len(seen_urls)
-
+    progress = _ScrapeProgress(seen_urls=seen_urls, result_count=len(seen_urls))
     state_path = state_path_for(args.relative_filepath)
-    if pull_mode:
-        current_url = admissions_url
-        print(f"Pulling new results from page 1 until {args.pull_seen_limit} "
-              "consecutive already-seen results are found.")
-    else:
-        state = load_state(state_path)
-        if state:
-            current_url = state["next_url"]
-            print(f"Resuming pagination from saved state ({result_count} unique results already in file).")
-        else:
-            current_url = admissions_url
 
-        if result_count >= args.num_results:
-            print(f"Already have {result_count} results (>= requested {args.num_results}); nothing to do.")
-            return
+    start_url = _starting_url(args, progress.result_count, state_path)
+    if start_url is None:
+        return
 
-    chrome_process = None
-    profile_dir = create_profile_dir()
-    consecutive_seen = 0
+    chrome = _ChromeSession(args.chrome_binary, create_profile_dir())
     try:
-        driver, chrome_process = chrome_helper(
-            admissions_url, "127.0.0.1:9222", args.chrome_binary, profile_dir
-        )
-
-        pages_completed = 0
-        total_start = time.time()
-        # first page (fresh or resumed) needs an explicit URL navigation;
-        # subsequent pages are reached by clicking "Next" inside scrape_data
-        navigate_by_url = True
-
-        while pull_mode or result_count < args.num_results:
-            admissions_results, next_page_url = scrape_data(
-                driver, current_url if navigate_by_url else None
-            )
-            navigate_by_url = False
-            parsed_results = clean_data(admissions_results, current_url)
-            pages_completed += 1
-
-            new_results = []
-            for result in parsed_results:
-                url = result.get("url")
-                if url in seen_urls:
-                    consecutive_seen += 1
-                else:
-                    consecutive_seen = 0
-                    new_results.append(result)
-            seen_urls.update(r["url"] for r in new_results if r.get("url"))
-            result_count += len(new_results)
-
-            if new_results:
-                save_data(new_results, args.relative_filepath)
-
-            # printed unconditionally for every page whether data was written
-            # or not, so read pages are always visible even when they add nothing new
-            print(
-                f"Page {pages_completed}: read {len(parsed_results)}, "
-                f"{len(new_results)} new ({result_count} total unique so far)"
-            )
-
-            if pull_mode and consecutive_seen >= args.pull_seen_limit:
-                print(f"Reached {consecutive_seen} consecutive already-seen results; stopping.")
-                break
-
-            if next_page_url is None:
-                print(f"No additional pages available. Stopping at {result_count} results.")
-                if not pull_mode:
-                    state_path.unlink(missing_ok=True)
-                break
-
-            if pull_mode:
-                print(f"Running total: {result_count}, {consecutive_seen} consecutive already-seen")
-            else:
-                # save pagination state even after reaching quota so later
-                # runs asking for more results resume near here instead of
-                # restarting the crawl from page 1
-                save_state({"next_url": next_page_url}, state_path)
-
-                if result_count >= args.num_results:
-                    print(f"Scraping finished with {result_count} results.")
-                    break
-
-                avg_loop_time = (time.time() - total_start) / pages_completed
-                remaining_results = args.num_results - result_count
-                remaining_pages = -(-remaining_results // 20)  # ceiling division
-                eta_seconds = remaining_pages * avg_loop_time
-                print(
-                    f"Running total: {result_count} (ETA: {format_duration(eta_seconds)})"
-                )
-
-            current_url = next_page_url
-
-            # periodic restart to clear accumulated browser session state
-            if pages_completed % RESTART_EVERY_N_PAGES == 0:
-                print("Restarting Chrome to clear accumulated session state...")
-                terminate_process(chrome_process)
-                driver, chrome_process = chrome_helper(
-                    admissions_url, "127.0.0.1:9222", args.chrome_binary, profile_dir
-                )
-                navigate_by_url = True
-
-        total_elapsed = round(time.time() - total_start, 0)
+        chrome.start()
+        progress.start_time = time.time()
+        _scrape_pages(args, chrome, progress, start_url, state_path)
+        total_elapsed = round(time.time() - progress.start_time, 0)
         print(f"Total scraping time: {format_duration(total_elapsed)}")
     except StopRequested:
         print("Stopping: cancellation requested. Results collected so far are already saved.")
     finally:
-        if chrome_process is not None:
-            terminate_process(chrome_process)
-        cleanup_profile(profile_dir)
+        chrome.close()
 
 
 if __name__ == "__main__":
+    # line-buffer stdout so each progress line reaches a piping parent
+    # process (Pull Data) as soon as it is printed
+    sys.stdout.reconfigure(line_buffering=True)
     run_scrape(parse_args())

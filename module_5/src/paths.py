@@ -9,8 +9,6 @@ from pathlib import Path
 PACKAGE_DIR = Path(__file__).resolve().parent
 PROJECT_DIR = PACKAGE_DIR.parent
 
-SCRAPE_SCRIPT = PACKAGE_DIR / "scraping" / "scrape.py"
-
 DATA_DIR = PROJECT_DIR / "data"
 STATE_DIR = DATA_DIR / ".state"
 

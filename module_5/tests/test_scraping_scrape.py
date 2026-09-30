@@ -12,7 +12,7 @@ from types import SimpleNamespace
 from urllib.error import URLError
 
 import pytest
-from selenium.common.exceptions import NoSuchElementException
+from selenium.common.exceptions import NoSuchElementException, WebDriverException
 
 import scraping.scrape as scrape
 
@@ -30,6 +30,28 @@ def no_real_sleep(monkeypatch):
 def test_handle_sigterm_raises_stop_requested():
     with pytest.raises(scrape.StopRequested):
         scrape._handle_sigterm(signum=None, frame=None)
+
+
+@pytest.mark.web
+@pytest.mark.parametrize("attempt,expected", [(1, 15), (2, 30), (3, 60)])
+def test_retry_policy_delay_doubles_each_attempt(attempt, expected):
+    assert scrape.RetryPolicy(attempts=5, base_delay=15).delay(attempt) == expected
+
+
+@pytest.mark.web
+def test_with_retries_does_not_retry_unexpected_errors():
+    """Only RETRYABLE_ERRORS are retried; anything else (a real bug)
+    must surface on the first attempt instead of being retried away."""
+    calls = []
+
+    def _buggy_action():
+        calls.append(1)
+        raise KeyError("programming error")
+
+    with pytest.raises(KeyError):
+        scrape._with_retries(_buggy_action, scrape.RetryPolicy(attempts=3, base_delay=0), "Test")
+
+    assert calls == [1]
 
 
 @pytest.mark.web
@@ -71,7 +93,7 @@ def test_open_chrome_launches_expected_command(monkeypatch):
 @pytest.mark.web
 def test_try_debug_endpoint_succeeds_immediately(monkeypatch):
     calls = []
-    monkeypatch.setattr(scrape, "urlopen", lambda *a, **kw: calls.append(1))
+    monkeypatch.setattr(scrape, "urlopen", lambda *a, **kw: calls.append(1) or _FakeResponse(b""))
 
     scrape._try_debug_endpoint("http://127.0.0.1:9222", retries=5)
 
@@ -86,6 +108,7 @@ def test_try_debug_endpoint_retries_then_succeeds(monkeypatch):
         attempts["count"] += 1
         if attempts["count"] < 3:
             raise URLError("not up yet")
+        return _FakeResponse(b"")
 
     monkeypatch.setattr(scrape, "urlopen", _fake_urlopen)
 
@@ -315,11 +338,12 @@ def test_chrome_helper_success_path(monkeypatch, chrome_helper_mocks):
 
 @pytest.mark.web
 def test_chrome_helper_retries_then_succeeds(monkeypatch, chrome_helper_mocks):
-    fake_driver = _FakeDriverForHelper(get_side_effects=[RuntimeError("boom"), None])
+    fake_driver = _FakeDriverForHelper(get_side_effects=[WebDriverException("boom"), None])
     monkeypatch.setattr(scrape, "_init_webdriver", lambda host_port: fake_driver)
 
     driver, process = scrape.chrome_helper(
-        "http://x", "127.0.0.1:9222", "/chrome", "/profile", retries=3, base_retry_delay=0
+        "http://x", "127.0.0.1:9222", "/chrome", "/profile",
+        retry=scrape.RetryPolicy(attempts=3, base_delay=0),
     )
 
     assert len(fake_driver.get_calls) == 2
@@ -328,12 +352,13 @@ def test_chrome_helper_retries_then_succeeds(monkeypatch, chrome_helper_mocks):
 
 @pytest.mark.web
 def test_chrome_helper_exhausts_retries_and_cleans_up(monkeypatch, chrome_helper_mocks):
-    fake_driver = _FakeDriverForHelper(get_side_effects=[RuntimeError("a"), RuntimeError("b")])
+    fake_driver = _FakeDriverForHelper(get_side_effects=[WebDriverException("a"), WebDriverException("b")])
     monkeypatch.setattr(scrape, "_init_webdriver", lambda host_port: fake_driver)
 
-    with pytest.raises(RuntimeError):
+    with pytest.raises(WebDriverException):
         scrape.chrome_helper(
-            "http://x", "127.0.0.1:9222", "/chrome", "/profile", retries=2, base_retry_delay=0
+            "http://x", "127.0.0.1:9222", "/chrome", "/profile",
+            retry=scrape.RetryPolicy(attempts=2, base_delay=0),
         )
 
     assert chrome_helper_mocks == ["fake_process"]
@@ -396,7 +421,7 @@ def test_get_page_succeeds_first_try():
 def test_get_page_retries_when_table_missing_then_succeeds():
     driver = _FakeDriverForPage([NO_TABLE_HTML, VALID_TABLE_HTML])
 
-    soup = scrape._get_page(driver, url=None, wait=0, retries=3, base_retry_delay=0)
+    soup = scrape._get_page(driver, url=None, wait=0, retry=scrape.RetryPolicy(attempts=3, base_delay=0))
 
     assert soup.find("tbody") is not None
     assert driver.refresh_calls == 1
@@ -406,8 +431,10 @@ def test_get_page_retries_when_table_missing_then_succeeds():
 def test_get_page_raises_after_exhausting_retries():
     driver = _FakeDriverForPage([NO_TABLE_HTML, NO_TABLE_HTML])
 
-    with pytest.raises(RuntimeError):
-        scrape._get_page(driver, url="http://x", wait=0, retries=2, base_retry_delay=0)
+    with pytest.raises(scrape.ResultsTableMissing):
+        scrape._get_page(
+            driver, url="http://x", wait=0, retry=scrape.RetryPolicy(attempts=2, base_delay=0)
+        )
 
 
 @pytest.mark.web
@@ -448,7 +475,9 @@ def test_click_next_page_returns_none_when_link_never_found():
         refresh=lambda: None,
     )
 
-    result = scrape._click_next_page(driver, missing_link_retries=2, missing_link_delay=0)
+    result = scrape._click_next_page(
+        driver, missing_link_retry=scrape.RetryPolicy(attempts=2, base_delay=0)
+    )
 
     assert result is None
 
@@ -470,7 +499,9 @@ def test_click_next_page_finds_link_after_missing_once():
         current_url="http://next-page",
     )
 
-    result = scrape._click_next_page(driver, missing_link_retries=3, missing_link_delay=0)
+    result = scrape._click_next_page(
+        driver, missing_link_retry=scrape.RetryPolicy(attempts=3, base_delay=0)
+    )
 
     assert result == "http://next-page"
 
@@ -482,7 +513,7 @@ def test_click_next_page_retries_on_click_failure_then_succeeds():
     def _execute_script(script, element):
         attempts["count"] += 1
         if attempts["count"] < 2:
-            raise RuntimeError("click failed")
+            raise WebDriverException("click failed")
 
     driver = SimpleNamespace(
         find_element=lambda by, xpath: object(),
@@ -490,7 +521,7 @@ def test_click_next_page_retries_on_click_failure_then_succeeds():
         current_url="http://next-page",
     )
 
-    result = scrape._click_next_page(driver, retries=3, base_retry_delay=0)
+    result = scrape._click_next_page(driver, retry=scrape.RetryPolicy(attempts=3, base_delay=0))
 
     assert result == "http://next-page"
 
@@ -499,11 +530,11 @@ def test_click_next_page_retries_on_click_failure_then_succeeds():
 def test_click_next_page_raises_after_exhausting_click_retries():
     driver = SimpleNamespace(
         find_element=lambda by, xpath: object(),
-        execute_script=lambda script, element: (_ for _ in ()).throw(RuntimeError("nope")),
+        execute_script=lambda script, element: (_ for _ in ()).throw(WebDriverException("nope")),
     )
 
-    with pytest.raises(RuntimeError):
-        scrape._click_next_page(driver, retries=2, base_retry_delay=0)
+    with pytest.raises(WebDriverException):
+        scrape._click_next_page(driver, retry=scrape.RetryPolicy(attempts=2, base_delay=0))
 
 
 # ---------------------------------------------------------------------------

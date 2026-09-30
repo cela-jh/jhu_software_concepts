@@ -1,27 +1,20 @@
 """
 `test_llm_helper.py`
-Covers llm_hosting/llm_helper.py: JSON Lines persistence, the resume/dedup
-logic across output files and leftover chunk files, and run_parallel()'s
-orchestration - with subprocess.Popen mocked (no real worker processes)
-and STATE_DIR redirected to tmp_path (never the real llm_hosting/.llm_state).
-
-llm_helper.py's own directory is added to sys.path so its bare
-`from llm_helper import ...`-style sibling imports resolve; it's imported
-under the plain name "llm_helper" (no collision risk - nothing else in
-this codebase uses that name).
+Covers llm_hosting/llm_helper.py: locating or downloading the model file,
+JSON Lines persistence, the resume/dedup logic across output files and
+leftover chunk files, and run_parallel()'s orchestration - with
+subprocess.Popen and the model download mocked (no real worker processes
+or network) and STATE_DIR redirected to tmp_path (never the real
+llm_hosting/.llm_state).
 """
 import json
+import subprocess
 import sys
-import types
-from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
 
-LLM_HOSTING_DIR = Path(__file__).resolve().parent.parent / "src" / "llm_hosting"
-sys.path.insert(0, str(LLM_HOSTING_DIR))
-
-import llm_helper
+import llm_hosting.llm_helper as llm_helper
 
 
 @pytest.fixture(autouse=True)
@@ -146,7 +139,7 @@ class _FakeWorkerProcess:
     worker: no real process ever runs. `wait_effects` is a queue of
     exceptions to raise (or None for a normal return) consumed one per
     .wait() call, for tests that need more than one distinct outcome
-    across the initial wait and _terminate_all()'s own follow-up wait."""
+    across the initial wait and _terminate_workers()'s own follow-up wait."""
 
     def __init__(self, returncode=0, wait_effects=None):
         self.returncode = returncode
@@ -174,16 +167,47 @@ class _FakeWorkerProcess:
 
 
 @pytest.fixture
-def fake_app_module(monkeypatch):
-    """run_parallel() does `from app import _get_model_path` lazily inside
-    its own body - "app" is permanently claimed in sys.modules by the
-    unrelated Flask package once conftest.py imports it, so this stands in
-    for the duration of each test that calls run_parallel."""
-    module = types.ModuleType("app")
+def fake_model_path(monkeypatch):
+    """Stands in for get_model_path() so run_parallel() never downloads a
+    real model; records each call so tests can confirm it ran first."""
     calls = []
-    module._get_model_path = lambda: calls.append(1) or "/fake/model.gguf"
-    monkeypatch.setitem(sys.modules, "app", module)
+    monkeypatch.setattr(llm_helper, "get_model_path",
+                        lambda: calls.append(1) or "/fake/model.gguf")
     return calls
+
+
+@pytest.fixture
+def fake_models_dir(tmp_path, monkeypatch):
+    models_dir = tmp_path / "models"
+    monkeypatch.setattr(llm_helper, "MODELS_DIR", models_dir)
+    return models_dir
+
+
+@pytest.mark.web
+def test_get_model_path_reuses_existing_file(fake_models_dir):
+    fake_models_dir.mkdir()
+    model_file = fake_models_dir / llm_helper.MODEL_FILE
+    model_file.write_text("fake gguf bytes")
+
+    assert llm_helper.get_model_path() == str(model_file)
+
+
+@pytest.mark.web
+def test_get_model_path_downloads_when_missing(fake_models_dir, monkeypatch):
+    download_calls = []
+
+    def _fake_download(repo_id, filename, local_dir):
+        download_calls.append((repo_id, filename, local_dir))
+        return "/fake/downloaded/model.gguf"
+
+    monkeypatch.setattr(llm_helper, "hf_hub_download", _fake_download)
+
+    result = llm_helper.get_model_path()
+
+    assert result == "/fake/downloaded/model.gguf"
+    assert download_calls == [
+        (llm_helper.MODEL_REPO, llm_helper.MODEL_FILE, str(fake_models_dir))
+    ]
 
 
 @pytest.mark.web
@@ -193,18 +217,18 @@ def test_run_parallel_raises_when_input_missing(tmp_path):
 
 
 @pytest.mark.web
-def test_run_parallel_raises_on_invalid_input_structure(tmp_path, fake_app_module):
+def test_run_parallel_raises_on_invalid_input_structure(tmp_path, fake_model_path):
     input_path = tmp_path / "in.json"
     input_path.write_text(json.dumps({"not": "a list of rows"}))
 
     with pytest.raises(ValueError):
         llm_helper.run_parallel(input_path, tmp_path / "out.json")
 
-    assert fake_app_module == [1]  # _get_model_path was still called first
+    assert fake_model_path == [1]  # get_model_path was still called first
 
 
 @pytest.mark.web
-def test_run_parallel_returns_early_when_nothing_remains(tmp_path, fake_app_module, monkeypatch):
+def test_run_parallel_returns_early_when_nothing_remains(tmp_path, fake_model_path, monkeypatch):
     input_path = tmp_path / "in.json"
     input_path.write_text(json.dumps([{"url": "a"}]))
     output_path = tmp_path / "out.json"
@@ -219,7 +243,7 @@ def test_run_parallel_returns_early_when_nothing_remains(tmp_path, fake_app_modu
 
 
 @pytest.mark.web
-def test_run_parallel_launches_workers_and_cleans_up_on_success(tmp_path, fake_app_module, monkeypatch):
+def test_run_parallel_launches_workers_and_cleans_up_on_success(tmp_path, fake_model_path, monkeypatch):
     input_path = tmp_path / "in.json"
     input_path.write_text(json.dumps([{"url": "a"}, {"url": "b"}]))
     output_path = tmp_path / "out.json"
@@ -235,13 +259,18 @@ def test_run_parallel_launches_workers_and_cleans_up_on_success(tmp_path, fake_a
     llm_helper.run_parallel(input_path, output_path, n_workers=2)
 
     assert len(popen_calls) == 2
+    # Workers run the standardizer as a package module from src/, with
+    # the same interpreter as this process.
+    (command,), kwargs = popen_calls[0]
+    assert command[:3] == [sys.executable, "-m", llm_helper.WORKER_MODULE]
+    assert kwargs["cwd"] == llm_helper.WORKER_CWD
     # No failures, so every chunk_* file (the input slices we really did
     # write, since no real worker ran to produce .jsonl output) is cleaned up.
     assert list(llm_helper.STATE_DIR.glob("chunk_*")) == []
 
 
 @pytest.mark.web
-def test_run_parallel_avoids_colliding_with_leftover_chunk_names(tmp_path, fake_app_module, monkeypatch):
+def test_run_parallel_avoids_colliding_with_leftover_chunk_names(tmp_path, fake_model_path, monkeypatch):
     input_path = tmp_path / "in.json"
     input_path.write_text(json.dumps([{"url": "a"}]))
     output_path = tmp_path / "out.json"
@@ -251,7 +280,7 @@ def test_run_parallel_avoids_colliding_with_leftover_chunk_names(tmp_path, fake_
     launched_paths = []
 
     def _fake_popen(args, **kwargs):
-        launched_paths.append(args[3])  # the --file path
+        launched_paths.append(args[args.index("--file") + 1])
         return _FakeWorkerProcess(returncode=0)
 
     monkeypatch.setattr(llm_helper.subprocess, "Popen", _fake_popen)
@@ -262,7 +291,7 @@ def test_run_parallel_avoids_colliding_with_leftover_chunk_names(tmp_path, fake_
 
 
 @pytest.mark.web
-def test_run_parallel_reports_failed_chunks_and_skips_cleanup(tmp_path, fake_app_module, monkeypatch, capsys):
+def test_run_parallel_reports_failed_chunks_and_skips_cleanup(tmp_path, fake_model_path, monkeypatch, capsys):
     input_path = tmp_path / "in.json"
     input_path.write_text(json.dumps([{"url": "a"}]))
     output_path = tmp_path / "out.json"
@@ -277,7 +306,7 @@ def test_run_parallel_reports_failed_chunks_and_skips_cleanup(tmp_path, fake_app
 
 
 @pytest.mark.web
-def test_run_parallel_terminates_workers_and_reraises_on_interrupt(tmp_path, fake_app_module, monkeypatch):
+def test_run_parallel_terminates_workers_and_reraises_on_interrupt(tmp_path, fake_model_path, monkeypatch):
     input_path = tmp_path / "in.json"
     input_path.write_text(json.dumps([{"url": "a"}]))
     output_path = tmp_path / "out.json"
@@ -292,17 +321,16 @@ def test_run_parallel_terminates_workers_and_reraises_on_interrupt(tmp_path, fak
 
 
 @pytest.mark.web
-def test_run_parallel_force_kills_worker_that_wont_terminate(tmp_path, fake_app_module, monkeypatch):
-    """If a worker doesn't exit within _terminate_all()'s own timeout
+def test_run_parallel_force_kills_worker_that_wont_terminate(tmp_path, fake_model_path, monkeypatch):
+    """If a worker doesn't exit within _terminate_workers()'s own timeout
     after being asked to, it should be force-killed."""
     input_path = tmp_path / "in.json"
     input_path.write_text(json.dumps([{"url": "a"}]))
     output_path = tmp_path / "out.json"
 
-    import subprocess as real_subprocess
     stubborn_process = _FakeWorkerProcess(wait_effects=[
         KeyboardInterrupt(),  # the initial wait, in the main try block
-        real_subprocess.TimeoutExpired(cmd="app.py", timeout=15),  # _terminate_all's own wait
+        subprocess.TimeoutExpired(cmd="app.py", timeout=15),  # _terminate_workers' own wait
         None,  # the wait() right after kill() succeeds
     ])
     monkeypatch.setattr(llm_helper.subprocess, "Popen", lambda *a, **kw: stubborn_process)

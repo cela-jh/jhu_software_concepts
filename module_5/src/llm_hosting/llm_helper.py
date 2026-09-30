@@ -1,16 +1,37 @@
 """
 `llm_helper.py`
 General-purpose helper functions supporting the LLM standardizer (`app.py`):
-running it in parallel across multiple worker processes, with crash/interrupt-safe
-resume based on each row's unique `url`.
+locating (and downloading once) the model file, and running the
+standardizer in parallel across multiple worker processes, with
+crash/interrupt-safe resume based on each row's unique `url`.
 """
 
+import argparse
 import json
 import os
 import subprocess
+import sys
 from pathlib import Path
 
+from huggingface_hub import hf_hub_download
+
 WORK_DIR = Path(__file__).parent
+
+# Workers run the standardizer as a module from src/ so its package
+# imports resolve the same way they do everywhere else.
+WORKER_MODULE = "llm_hosting.app"
+WORKER_CWD = WORK_DIR.parent
+
+# ---------------- Model config ----------------
+MODEL_REPO = os.getenv(
+    "MODEL_REPO",
+    "TheBloke/TinyLlama-1.1B-Chat-v1.0-GGUF",
+)
+MODEL_FILE = os.getenv(
+    "MODEL_FILE",
+    "tinyllama-1.1b-chat-v1.0.Q4_K_M.gguf",
+)
+MODELS_DIR = WORK_DIR / "models"
 
 # Holds transient per-worker files only. chunk_<i>.json is a worker's input
 # slice, a copy of rows still needing processing. chunk_<i>.jsonl is that
@@ -21,6 +42,27 @@ WORK_DIR = Path(__file__).parent
 # merging are never reprocessed. Chunk files are deleted one at a time,
 # only after their rows have been safely merged into the real output file.
 STATE_DIR = WORK_DIR / ".llm_state"
+
+# Seconds a worker gets to exit after being asked to terminate before it
+# is force-killed.
+WORKER_TERMINATE_TIMEOUT = 15
+
+
+def get_model_path() -> str:
+    """
+    Download the GGUF file if not already present, otherwise reuse it.
+
+    :returns: Path to the local GGUF model file.
+    :rtype: str
+    """
+    local_path = MODELS_DIR / MODEL_FILE
+    if local_path.is_file():
+        return str(local_path)
+    return hf_hub_download(
+        repo_id=MODEL_REPO,
+        filename=MODEL_FILE,
+        local_dir=str(MODELS_DIR),
+    )
 
 
 def _read_jsonl(path):
@@ -33,7 +75,7 @@ def _read_jsonl(path):
     :rtype: list[dict]
     """
     rows = []
-    with open(path) as f:
+    with open(path, encoding="utf-8") as f:
         for line in f:
             line = line.strip()
             if line:
@@ -61,7 +103,7 @@ def _safe_write_json(rows, output_path):
     output_path = Path(output_path)
     if output_path.is_file():
         try:
-            existing = json.loads(output_path.read_text())
+            existing = json.loads(output_path.read_text(encoding="utf-8"))
         except (json.JSONDecodeError, OSError):
             existing = []
         if isinstance(existing, list) and len(rows) < len(existing):
@@ -71,7 +113,7 @@ def _safe_write_json(rows, output_path):
             )
 
     tmp_path = output_path.with_suffix(output_path.suffix + ".tmp")
-    with open(tmp_path, "w") as f:
+    with open(tmp_path, "w", encoding="utf-8") as f:
         json.dump(rows, f, indent=2)
     os.replace(tmp_path, output_path)
 
@@ -88,7 +130,7 @@ def jsonl_to_json(jsonl_path, json_path):
     :rtype: None
     """
     rows = _read_jsonl(jsonl_path)
-    with open(json_path, "w") as f:
+    with open(json_path, "w", encoding="utf-8") as f:
         json.dump(rows, f, indent=2)
 
 
@@ -112,7 +154,7 @@ def _load_completed(output_path, key):
     output_path = Path(output_path)
     if output_path.is_file():
         try:
-            existing = json.loads(output_path.read_text())
+            existing = json.loads(output_path.read_text(encoding="utf-8"))
         except (json.JSONDecodeError, OSError):
             existing = []
         for row in existing if isinstance(existing, list) else []:
@@ -147,21 +189,193 @@ def _merge_and_write(output_path, key):
     return len(completed)
 
 
+def _read_input_rows(input_path):
+    """
+    Read the standardizer's input file, requiring a JSON array of row
+    objects.
+
+    :param input_path: Path to the JSON array of rows to standardize.
+    :type input_path: pathlib.Path
+    :raises ValueError: If the file isn't a JSON array of row objects.
+    :returns: The rows.
+    :rtype: list[dict]
+    """
+    with open(input_path, encoding="utf-8") as f:
+        rows = json.load(f)
+    if not isinstance(rows, list) or not all(isinstance(r, dict) for r in rows):
+        raise ValueError(
+            f"{input_path} must contain a JSON array of row objects. "
+            "Check that the file was produced by the scraper and was not truncated."
+        )
+    return rows
+
+
+def _split_into_chunks(rows, n_workers):
+    """
+    Split rows into at most n_workers nearly equal, consecutive chunks.
+
+    :param rows: The rows to split.
+    :type rows: list[dict]
+    :param n_workers: The number of worker processes to split across.
+    :type n_workers: int
+    :returns: The chunks, in order.
+    :rtype: list[list[dict]]
+    """
+    chunk_size = -(-len(rows) // n_workers)  # ceiling division
+    return [rows[i:i + chunk_size] for i in range(0, len(rows), chunk_size)]
+
+
+def _next_run_id():
+    """
+    Find the first run id with no chunk files in STATE_DIR, so a chunk
+    file left behind by a prior interrupted run is never overwritten
+    before it has been merged.
+
+    :returns: An unused run id.
+    :rtype: int
+    """
+    run_id = 0
+    while list(STATE_DIR.glob(f"chunk_{run_id}_*.json*")):
+        run_id += 1
+    return run_id
+
+
+def _worker_env(n_threads):
+    """
+    Build the environment for worker processes, capping every math
+    backend at n_threads threads so workers don't oversubscribe the CPU.
+
+    Workers default to GPU offload through Metal rather than CPU-only.
+    Benchmarking on this machine found GPU offload runs roughly 35 times
+    faster per call than single-threaded CPU. Set N_GPU_LAYERS=0 in the
+    calling environment to force CPU-only workers instead, such as on a
+    machine without a usable GPU backend.
+
+    :param n_threads: Threads per worker process.
+    :type n_threads: int
+    :returns: The environment mapping.
+    :rtype: dict
+    """
+    return {
+        **os.environ,
+        "N_THREADS": str(n_threads),
+        "VECLIB_MAXIMUM_THREADS": str(n_threads),  # macOS Accelerate/vecLib backend
+        "OMP_NUM_THREADS": str(n_threads),
+        "OPENBLAS_NUM_THREADS": str(n_threads),
+        "N_GPU_LAYERS": os.environ.get("N_GPU_LAYERS", "99"),
+    }
+
+
+def _launch_workers(chunks, run_id, env, procs):
+    """
+    Write each chunk to STATE_DIR and start one standardizer worker per
+    chunk, appending each (chunk index, process) pair to procs as it
+    starts, so a caller interrupted partway through can still stop
+    every worker already running.
+
+    :param chunks: The row chunks, one per worker.
+    :type chunks: list[list[dict]]
+    :param run_id: This run's id, used in every chunk file name.
+    :type run_id: int
+    :param env: The worker environment from _worker_env().
+    :type env: dict
+    :param procs: The list to append (chunk index, process) pairs to.
+    :type procs: list[tuple(int, subprocess.Popen)]
+    :returns: None.
+    :rtype: None
+    """
+    for i, chunk in enumerate(chunks):
+        chunk_in_path = STATE_DIR / f"chunk_{run_id}_{i}.json"
+        chunk_out_path = STATE_DIR / f"chunk_{run_id}_{i}.jsonl"
+        chunk_in_path.write_text(json.dumps(chunk), encoding="utf-8")
+        # Workers run concurrently and are waited on by the caller, so
+        # a with block here would serialize them.
+        procs.append((i, subprocess.Popen(  # pylint: disable=consider-using-with
+            [sys.executable, "-m", WORKER_MODULE, "--file", str(chunk_in_path),
+             "--out", str(chunk_out_path), "--append"],
+            cwd=WORKER_CWD,
+            env=env,
+        )))
+
+
+def _wait_for_workers(procs):
+    """
+    Wait for every worker to exit.
+
+    :param procs: The (chunk index, process) pairs to wait on.
+    :type procs: list[tuple(int, subprocess.Popen)]
+    :returns: Indexes of chunks whose worker exited with an error.
+    :rtype: list[int]
+    """
+    failed_chunks = []
+    for i, p in procs:
+        p.wait()
+        if p.returncode != 0:
+            failed_chunks.append(i)
+    return failed_chunks
+
+
+def _terminate_workers(procs):
+    """
+    Ask every still-running worker to terminate, force-killing any that
+    haven't exited within WORKER_TERMINATE_TIMEOUT seconds.
+
+    :param procs: The (chunk index, process) pairs to stop.
+    :type procs: list[tuple(int, subprocess.Popen)]
+    :returns: None.
+    :rtype: None
+    """
+    for _, p in procs:
+        if p.poll() is None:
+            p.terminate()
+    for _, p in procs:
+        try:
+            p.wait(timeout=WORKER_TERMINATE_TIMEOUT)
+        except subprocess.TimeoutExpired:
+            p.kill()
+            p.wait()
+
+
+def _run_workers(chunks, run_id, n_threads, output_path, key):
+    """
+    Run one worker per chunk and wait for all of them. On Ctrl+C or a
+    kill, stop every worker and merge whatever they wrote before
+    re-raising, so a re-run picks up where this one left off.
+
+    :param chunks: The row chunks, one per worker.
+    :type chunks: list[list[dict]]
+    :param run_id: This run's id, used in every chunk file name.
+    :type run_id: int
+    :param n_threads: Threads per worker process.
+    :type n_threads: int
+    :param output_path: Path to the merged JSON output file.
+    :type output_path: str or pathlib.Path
+    :param key: The row field used as the unique identifier.
+    :type key: str
+    :returns: Indexes of chunks whose worker exited with an error.
+    :rtype: list[int]
+    """
+    procs = []
+    try:
+        _launch_workers(chunks, run_id, _worker_env(n_threads), procs)
+        return _wait_for_workers(procs)
+    except (KeyboardInterrupt, SystemExit):
+        print("\nInterrupted - stopping workers and saving progress so far...")
+        _terminate_workers(procs)
+        merged_count = _merge_and_write(output_path, key)
+        print(f"Progress saved: {merged_count} rows total in {output_path}. "
+              f"Re-run with the same arguments to continue.")
+        raise
+
+
 def run_parallel(input_path, output_path, n_workers=4, n_threads=1, key="url"):
     """
     Read input_path and standardize every row not already present by url
     in output_path or in a leftover chunk_*.jsonl state file. Splits the
-    remaining rows across n_workers app.py subprocesses, each writing its
-    own chunk_<i>.jsonl in STATE_DIR incrementally.
-
-    Workers default to GPU offload through Metal rather than CPU-only.
-    Benchmarking on this machine found GPU offload runs roughly 35 times
-    faster per call than single-threaded CPU, and aggregate throughput
-    across concurrent workers saturates around 4 workers. Going wider than
-    that adds queueing latency per call without further aggregate gain,
-    unlike the CPU-only path, where more workers scales roughly linearly.
-    Set N_GPU_LAYERS=0 in the calling environment to force CPU-only workers
-    instead, such as on a machine without a usable GPU backend.
+    remaining rows across n_workers worker subprocesses, each writing its
+    own chunk_<i>.jsonl in STATE_DIR incrementally. Aggregate throughput
+    across GPU workers saturates around 4 workers; going wider adds
+    queueing latency per call without further gain.
 
     Safe to interrupt with Ctrl+C or to kill. On interrupt, already-running
     workers are asked to terminate, then whatever they wrote is merged into
@@ -193,18 +407,9 @@ def run_parallel(input_path, output_path, n_workers=4, n_threads=1, key="url"):
             f"Input file {input_path} does not exist. Check the path and try again."
         )
 
-    from app import _get_model_path
-    _get_model_path()  # download once before workers race on it
-
+    get_model_path()  # download once before workers race on it
     STATE_DIR.mkdir(exist_ok=True)
-
-    with open(input_path) as f:
-        rows = json.load(f)
-    if not isinstance(rows, list) or not all(isinstance(r, dict) for r in rows):
-        raise ValueError(
-            f"{input_path} must contain a JSON array of row objects. "
-            "Check that the file was produced by the scraper and was not truncated."
-        )
+    rows = _read_input_rows(input_path)
 
     completed = _load_completed(output_path, key)
     remaining = [r for r in rows if r.get(key) not in completed]
@@ -216,63 +421,8 @@ def run_parallel(input_path, output_path, n_workers=4, n_threads=1, key="url"):
         _merge_and_write(output_path, key)
         return
 
-    chunk_size = -(-len(remaining) // n_workers)  # ceiling division
-    chunks = [remaining[i:i + chunk_size] for i in range(0, len(remaining), chunk_size)]
-
-    # Fresh, collision-free names each run so a chunk file left behind by a
-    # prior interrupted run is never overwritten before it has been folded
-    # into `completed` above.
-    run_id = 0
-    while list(STATE_DIR.glob(f"chunk_{run_id}_*.json*")):
-        run_id += 1
-
-    procs = []  # (chunk_index, Popen) pairs
-    env = {
-        **os.environ,
-        "N_THREADS": str(n_threads),
-        "VECLIB_MAXIMUM_THREADS": str(n_threads),  # macOS Accelerate/vecLib backend
-        "OMP_NUM_THREADS": str(n_threads),
-        "OPENBLAS_NUM_THREADS": str(n_threads),
-        "N_GPU_LAYERS": os.environ.get("N_GPU_LAYERS", "99"),
-    }
-
-    def _launch_all():
-        for i, chunk in enumerate(chunks):
-            chunk_in_path = STATE_DIR / f"chunk_{run_id}_{i}.json"
-            chunk_out_path = STATE_DIR / f"chunk_{run_id}_{i}.jsonl"
-            chunk_in_path.write_text(json.dumps(chunk))
-            procs.append((i, subprocess.Popen(
-                ["python", "app.py", "--file", str(chunk_in_path),
-                 "--out", str(chunk_out_path), "--append"],
-                cwd=WORK_DIR,
-                env=env,
-            )))
-
-    def _terminate_all():
-        for _, p in procs:
-            if p.poll() is None:
-                p.terminate()
-        for _, p in procs:
-            try:
-                p.wait(timeout=15)
-            except subprocess.TimeoutExpired:
-                p.kill()
-                p.wait()
-
-    try:
-        _launch_all()
-        failed_chunks = []
-        for i, p in procs:
-            p.wait()
-            if p.returncode != 0:
-                failed_chunks.append(i)
-    except (KeyboardInterrupt, SystemExit):
-        print("\nInterrupted - stopping workers and saving progress so far...")
-        _terminate_all()
-        merged_count = _merge_and_write(output_path, key)
-        print(f"Progress saved: {merged_count} rows total in {output_path}. "
-              f"Re-run with the same arguments to continue.")
-        raise
+    chunks = _split_into_chunks(remaining, n_workers)
+    failed_chunks = _run_workers(chunks, _next_run_id(), n_threads, output_path, key)
 
     if failed_chunks:
         print(f"Warning: {len(failed_chunks)} of {len(chunks)} chunks failed "
@@ -297,20 +447,33 @@ def parse_args():
     :returns: Parsed arguments.
     :rtype: argparse.Namespace
     """
-    import argparse
-
     parser = argparse.ArgumentParser(
         description="Run the LLM standardizer in parallel across multiple worker processes."
     )
-    parser.add_argument("input_path", type=Path, help="Input JSON file (list of result rows).")
-    parser.add_argument("output_path", type=Path, help="Path to write the merged, standardized JSON output.")
-    parser.add_argument("--n_workers", type=int, default=4, help="Number of parallel worker processes (default: 4).")
-    parser.add_argument("--n_threads", type=int, default=1, help="Threads per worker process (default: 1, to avoid CPU oversubscription).")
-    parser.add_argument("--key", default="url", help="Row field used as the unique identifier for resume/dedup (default: url).")
+    parser.add_argument("input_path", type=Path,
+                        help="Input JSON file (list of result rows).")
+    parser.add_argument("output_path", type=Path,
+                        help="Path to write the merged, standardized JSON output.")
+    parser.add_argument("--n_workers", type=int, default=4,
+                        help="Number of parallel worker processes (default: 4).")
+    parser.add_argument("--n_threads", type=int, default=1,
+                        help="Threads per worker process "
+                             "(default: 1, to avoid CPU oversubscription).")
+    parser.add_argument("--key", default="url",
+                        help="Row field used as the unique identifier for "
+                             "resume/dedup (default: url).")
     return parser.parse_args()
 
 
 def main(args):
+    """
+    CLI entry point: run the parallel standardizer with parsed arguments.
+
+    :param args: Parsed arguments, as returned by parse_args().
+    :type args: argparse.Namespace
+    :returns: None.
+    :rtype: None
+    """
     run_parallel(args.input_path, args.output_path, args.n_workers, args.n_threads, args.key)
 
 

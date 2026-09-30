@@ -60,7 +60,7 @@ def load_existing_urls(filepath):
     """
     if not filepath.exists() or filepath.stat().st_size == 0:
         return set()
-    with open(filepath) as f:
+    with open(filepath, encoding="utf-8") as f:
         data = json.load(f)
     return {row["url"] for row in data if row.get("url")}
 
@@ -100,7 +100,7 @@ def save_state(state, filepath):
     :returns: None.
     :rtype: None
     """
-    with open(filepath, "w") as f:
+    with open(filepath, "w", encoding="utf-8") as f:
         json.dump(state, f)
 
 
@@ -115,5 +115,5 @@ def load_state(filepath):
     """
     if not filepath.is_file():
         return None
-    with open(filepath) as f:
+    with open(filepath, encoding="utf-8") as f:
         return json.load(f)

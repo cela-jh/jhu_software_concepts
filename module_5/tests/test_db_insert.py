@@ -30,7 +30,7 @@ def test_pull_inserts_rows_with_required_fields(client, monkeypatch, tmp_path, d
 
     response = client.post("/pull-data")
     assert response.status_code == 200
-    pull_control._thread.join(timeout=5)
+    pull_control._state.thread.join(timeout=5)
 
     with db_connection.cursor() as cursor:
         cursor.execute("SELECT count(*) FROM applicants")
@@ -58,7 +58,7 @@ def test_repeated_pull_does_not_duplicate_rows(client, monkeypatch, tmp_path, db
 
     first_response = client.post("/pull-data")
     assert first_response.status_code == 200
-    pull_control._thread.join(timeout=5)
+    pull_control._state.thread.join(timeout=5)
 
     with db_connection.cursor() as cursor:
         cursor.execute("SELECT count(*) FROM applicants")
@@ -68,7 +68,7 @@ def test_repeated_pull_does_not_duplicate_rows(client, monkeypatch, tmp_path, db
     # a re-scrape that finds nothing new.
     second_response = client.post("/pull-data")
     assert second_response.status_code == 200
-    pull_control._thread.join(timeout=5)
+    pull_control._state.thread.join(timeout=5)
 
     with db_connection.cursor() as cursor:
         cursor.execute("SELECT count(*) FROM applicants")

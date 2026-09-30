@@ -2,7 +2,6 @@
 `db_helpers.py`
 Reusable functions for connecting to and disconnecting from PostgreSQL.
 """
-import os
 import re
 import psycopg
 from psycopg.rows import dict_row

@@ -11,16 +11,29 @@ import subprocess
 import sys
 import threading
 from collections import deque
+from dataclasses import dataclass
 
 from database.load_data import load_data
-from paths import SCRAPE_SCRIPT, DEFAULT_DATA_FILE as DATA_FILE
+from paths import PACKAGE_DIR, DEFAULT_DATA_FILE as DATA_FILE
+from scraping.scrape import CHROME_DEBUG_PORT
 
 RECENT_LINES = 5
-CHROME_DEBUG_PORT = 9222
+SCRAPE_MODULE = "scraping.scrape"
+
+
+@dataclass
+class _PullState:
+    """
+    The single pull that may be running: its scrape subprocess and the
+    background thread streaming that subprocess's output and uploading
+    its results. Both stay None until the first pull starts.
+    """
+    process: subprocess.Popen | None = None
+    thread: threading.Thread | None = None
+
 
 _lock = threading.Lock()
-_process = None
-_thread = None
+_state = _PullState()
 _lines = deque(maxlen=RECENT_LINES)
 
 
@@ -34,10 +47,11 @@ def kill_stale_chrome():
     :returns: None.
     :rtype: None
     """
+    # lsof exits non-zero when nothing is listening, which is expected
     try:
         result = subprocess.run(
             ["lsof", f"-tiTCP:{CHROME_DEBUG_PORT}", "-sTCP:LISTEN"],
-            capture_output=True, text=True,
+            capture_output=True, text=True, check=False,
         )
     except FileNotFoundError:
         return
@@ -57,7 +71,7 @@ def is_running():
     :rtype: bool
     """
     with _lock:
-        return _thread is not None and _thread.is_alive()
+        return _state.thread is not None and _state.thread.is_alive()
 
 
 def recent_lines():
@@ -84,21 +98,24 @@ def start(chrome_binary, database_url):
     :returns: True if a pull was started, False if one was already running.
     :rtype: bool
     """
-    global _process, _thread
     with _lock:
-        if _thread is not None and _thread.is_alive():
+        if _state.thread is not None and _state.thread.is_alive():
             return False
         _lines.clear()
         _lines.append("Starting pull...")
-        _process = subprocess.Popen(
-            [sys.executable, str(SCRAPE_SCRIPT),
+        # The scraper outlives this function and is closed by the
+        # background thread's wait(), so a with block cannot own it.
+        # Run from src/ so the scraper's package imports resolve.
+        _state.process = subprocess.Popen(  # pylint: disable=consider-using-with
+            [sys.executable, "-m", SCRAPE_MODULE,
              "--chrome_binary", str(chrome_binary), str(DATA_FILE)],
             stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True,
+            cwd=PACKAGE_DIR,
         )
-        _thread = threading.Thread(
-            target=_stream_and_upload, args=(_process, database_url), daemon=True
+        _state.thread = threading.Thread(
+            target=_stream_and_upload, args=(_state.process, database_url), daemon=True
         )
-        _thread.start()
+        _state.thread.start()
     return True
 
 
@@ -114,10 +131,10 @@ def cancel():
     :rtype: str
     """
     with _lock:
-        if _thread is None or not _thread.is_alive():
+        if _state.thread is None or not _state.thread.is_alive():
             return "not_running"
-        if _process is not None and _process.poll() is None:
-            _process.terminate()
+        if _state.process is not None and _state.process.poll() is None:
+            _state.process.terminate()
             return "cancelling"
         return "finishing"
 

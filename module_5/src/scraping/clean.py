@@ -89,8 +89,8 @@ def _parse_main_row(main_row, url):
     program_spans = cells[1].find_all("span")
     program = program_spans[0].get_text(strip=True)
     degree_text = program_spans[1].get_text(strip=True)
-    is_phd_other = True if _get_tag("degree", degree_text) else False
-    degree = _get_tag("degree", degree_text) if is_phd_other else "Masters"
+    # anything not tagged PhD or Other is a master's program
+    degree = _get_tag("degree", degree_text) or "Masters"
 
     # get date added from third cell
     date_added = "Added on " + cells[2].get_text(strip=True)
@@ -101,7 +101,7 @@ def _parse_main_row(main_row, url):
     decision_date = _get_tag("decision date", status_text)
 
     # get url from fifth cell
-    result_url = urljoin(url, cells[4].find("a")["href"])  
+    result_url = urljoin(url, cells[4].find("a")["href"])
 
     main_row_parsed = {
         "program": program + ", " + school,
@@ -165,7 +165,7 @@ def _parse_sub_rows(extra_rows):
     :returns: A combined dictionary of tags and comment data.
     :rtype: dict
     """
-    sub_rows_parsed = dict()
+    sub_rows_parsed = {}
     tags_row_parsed = _parse_tags_row(extra_rows[0])
     sub_rows_parsed.update(tags_row_parsed)
 

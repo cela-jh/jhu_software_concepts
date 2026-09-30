@@ -3,6 +3,9 @@
 
 from __future__ import annotations
 
+import argparse
+import contextlib
+import functools
 import json
 import os
 import re
@@ -13,29 +16,22 @@ from pathlib import Path
 from typing import Any, Dict, List, Tuple
 
 from flask import Flask, jsonify, request
-from huggingface_hub import hf_hub_download
 from llama_cpp import Llama  # CPU-only by default if N_GPU_LAYERS=0
 
-from llm_helper import run_parallel
+from llm_hosting.llm_helper import get_model_path, run_parallel
 
 app = Flask(__name__)
 
 # ---------------- Model config ----------------
-MODEL_REPO = os.getenv(
-    "MODEL_REPO",
-    "TheBloke/TinyLlama-1.1B-Chat-v1.0-GGUF",
-)
-MODEL_FILE = os.getenv(
-    "MODEL_FILE",
-    "tinyllama-1.1b-chat-v1.0.Q4_K_M.gguf",
-)
-
 N_THREADS = int(os.getenv("N_THREADS", str(os.cpu_count() or 2)))
 N_CTX = int(os.getenv("N_CTX", "1024"))
 N_GPU_LAYERS = int(os.getenv("N_GPU_LAYERS", "0"))  # 0 → CPU-only
 
-CANON_UNIS_PATH = os.getenv("CANON_UNIS_PATH", "canon_universities.txt")
-CANON_PROGS_PATH = os.getenv("CANON_PROGS_PATH", "canon_programs.txt")
+# Canonical name lists live beside this file, so the defaults resolve
+# regardless of the directory the standardizer is started from.
+LLM_HOSTING_DIR = Path(__file__).resolve().parent
+CANON_UNIS_PATH = os.getenv("CANON_UNIS_PATH", str(LLM_HOSTING_DIR / "canon_universities.txt"))
+CANON_PROGS_PATH = os.getenv("CANON_PROGS_PATH", str(LLM_HOSTING_DIR / "canon_programs.txt"))
 
 # Precompiled, non-greedy JSON object matcher to tolerate chatter around JSON
 JSON_OBJ_RE = re.compile(r"\{.*?\}", re.DOTALL)
@@ -147,28 +143,7 @@ FEW_SHOTS: List[Tuple[Dict[str, str], Dict[str, str]]] = [
     ),
 ]
 
-_LLM: Llama | None = None
-
-MODELS_DIR = Path(__file__).parent / "models"
-
-
-def _get_model_path() -> str:
-    """
-    Download the GGUF file if not already present, otherwise reuse it.
-
-    :returns: Path to the local GGUF model file.
-    :rtype: str
-    """
-    local_path = MODELS_DIR / MODEL_FILE
-    if local_path.is_file():
-        return str(local_path)
-    return hf_hub_download(
-        repo_id=MODEL_REPO,
-        filename=MODEL_FILE,
-        local_dir=str(MODELS_DIR),
-    )
-
-
+@functools.lru_cache(maxsize=1)
 def _load_llm() -> Llama:
     """
     Initialize llama.cpp using the (already downloaded) GGUF file.
@@ -176,14 +151,8 @@ def _load_llm() -> Llama:
     :returns: The loaded model, cached for reuse across calls.
     :rtype: llama_cpp.Llama
     """
-    global _LLM
-    if _LLM is not None:
-        return _LLM
-
-    model_path = _get_model_path()
-
-    _LLM = Llama(
-        model_path=model_path,
+    return Llama(
+        model_path=get_model_path(),
         n_ctx=N_CTX,
         n_threads=N_THREADS,
         # llama-cpp-python defaults n_threads_batch to multiprocessing.cpu_count()
@@ -193,7 +162,6 @@ def _load_llm() -> Llama:
         n_gpu_layers=N_GPU_LAYERS,
         verbose=False,
     )
-    return _LLM
 
 
 def _split_fallback(text: str) -> Tuple[str, str]:
@@ -340,12 +308,15 @@ def _call_llm(program_text: str) -> Dict[str, str]:
     # the "}" that ended generation early needs restoring before JSON parsing
     if out["choices"][0].get("finish_reason") == "stop":
         text += "}"
+    # Unparseable output raises JSONDecodeError; valid JSON that isn't an
+    # object (a bare string or list) has no .get() and raises
+    # AttributeError. Either way, fall back to rule-based splitting.
     try:
         match = JSON_OBJ_RE.search(text)
         obj = json.loads(match.group(0) if match else text)
         std_prog = str(obj.get("llm_generated_program", "")).strip()
         std_uni = str(obj.get("llm_generated_university", "")).strip()
-    except Exception:
+    except (json.JSONDecodeError, AttributeError):
         std_prog, std_uni = _split_fallback(program_text)
 
     if not std_uni:
@@ -376,6 +347,23 @@ def _normalize_input(payload: Any) -> List[Dict[str, Any]]:
     return []
 
 
+def _standardize_row(row: Dict[str, Any]) -> Dict[str, Any]:
+    """
+    Add the LLM-standardized program and university to a row, in place.
+
+    :param row: A result row with a `program` field.
+    :type row: dict
+    :returns: The same row, with `llm-generated-program` and
+        `llm-generated-university` set.
+    :rtype: dict
+    """
+    program_text = (row or {}).get("program") or ""
+    result = _call_llm(program_text)
+    row["llm-generated-program"] = result["llm_generated_program"]
+    row["llm-generated-university"] = result["llm_generated_university"]
+    return row
+
+
 @app.get("/")
 def health() -> Any:
     """
@@ -398,15 +386,7 @@ def standardize() -> Any:
     """
     payload = request.get_json(force=True, silent=True)
     rows = _normalize_input(payload)
-
-    out: List[Dict[str, Any]] = []
-    for row in rows:
-        program_text = (row or {}).get("program") or ""
-        result = _call_llm(program_text)
-        row["llm-generated-program"] = result["llm_generated_program"]
-        row["llm-generated-university"] = result["llm_generated_university"]
-        out.append(row)
-
+    out: List[Dict[str, Any]] = [_standardize_row(row) for row in rows]
     return jsonify({"rows": out})
 
 
@@ -423,6 +403,55 @@ def _format_duration(seconds: float) -> str:
     h, rem = divmod(seconds, 3600)
     m, s = divmod(rem, 60)
     return f"{h}:{m:02d}:{s:02d}" if h else f"{m}:{s:02d}"
+
+
+def _open_sink(in_path: str, out_path: str | None, append: bool, to_stdout: bool):
+    """
+    Open the JSON Lines destination as a context manager. Standard
+    output is wrapped so leaving the with block never closes it.
+
+    :param in_path: Path to the JSON input file.
+    :type in_path: str
+    :param out_path: Path to write JSON Lines output to, or None to
+        default to `<in_path>.jsonl`.
+    :type out_path: str or None
+    :param append: Whether to append to out_path instead of overwriting it.
+    :type append: bool
+    :param to_stdout: Whether to write JSON Lines to stdout instead of a file.
+    :type to_stdout: bool
+    :returns: A context manager yielding a writable text stream.
+    :rtype: contextlib.AbstractContextManager
+    """
+    if to_stdout:
+        return contextlib.nullcontext(sys.stdout)
+    # returned unopened by any with block here; the caller's with owns it
+    return open(  # pylint: disable=consider-using-with
+        out_path or (in_path + ".jsonl"), "a" if append else "w", encoding="utf-8"
+    )
+
+
+def _print_progress(done: int, total: int, avg: float, url: str) -> None:
+    """
+    Print one worker progress line with a per-record average and ETA.
+
+    :param done: Records written so far.
+    :type done: int
+    :param total: Total records this worker will write.
+    :type total: int
+    :param avg: Average seconds per record so far.
+    :type avg: float
+    :param url: The url of the record just written.
+    :type url: str
+    :returns: None.
+    :rtype: None
+    """
+    eta = _format_duration(avg * (total - done))
+    print(
+        f"[pid {os.getpid()}] wrote record {done}/{total} "
+        f"(url={url}) | avg {avg:.2f}s/record | "
+        f"ETA for this worker: {eta}",
+        flush=True,
+    )
 
 
 def _cli_process_file(
@@ -449,26 +478,12 @@ def _cli_process_file(
     with open(in_path, "r", encoding="utf-8") as f:
         rows = _normalize_input(json.load(f))
 
-    sink = sys.stdout if to_stdout else None
-    if not to_stdout:
-        out_path = out_path or (in_path + ".jsonl")
-        mode = "a" if append else "w"
-        sink = open(out_path, mode, encoding="utf-8")
-
-    assert sink is not None  # for type-checkers
-
     total = len(rows)
     elapsed_total = 0.0
-    pid = os.getpid()
-
-    try:
+    with _open_sink(in_path, out_path, append, to_stdout) as sink:
         for i, row in enumerate(rows, start=1):
             start = time.monotonic()
-
-            program_text = (row or {}).get("program") or ""
-            result = _call_llm(program_text)
-            row["llm-generated-program"] = result["llm_generated_program"]
-            row["llm-generated-university"] = result["llm_generated_university"]
+            _standardize_row(row)
 
             json.dump(row, sink, ensure_ascii=False)
             sink.write("\n")
@@ -476,24 +491,16 @@ def _cli_process_file(
             # crash or interrupt on the next row never loses one already written
 
             elapsed_total += time.monotonic() - start
-            avg = elapsed_total / i
-            remaining = total - i
-            eta = _format_duration(avg * remaining)
-            url = (row or {}).get("url", "")
-            print(
-                f"[pid {pid}] wrote record {i}/{total} "
-                f"(url={url}) | avg {avg:.2f}s/record | "
-                f"ETA for this worker: {eta}",
-                flush=True,
-            )
-    finally:
-        if sink is not sys.stdout:
-            sink.close()
+            _print_progress(i, total, elapsed_total / i, (row or {}).get("url", ""))
 
 
-if __name__ == "__main__":
-    import argparse
+def parse_args() -> argparse.Namespace:
+    """
+    Parse CLI arguments for the standardizer.
 
+    :returns: Parsed arguments.
+    :rtype: argparse.Namespace
+    """
     parser = argparse.ArgumentParser(
         description="Standardize program/university with a tiny local LLM.",
     )
@@ -545,14 +552,24 @@ if __name__ == "__main__":
         help="Threads per worker process when --parallel is set (default: 1, "
         "to avoid CPU oversubscription).",
     )
-    args = parser.parse_args()
+    return parser.parse_args()
 
+
+def main(args: argparse.Namespace) -> None:
+    """
+    CLI entry point: serve over HTTP, run in parallel, or process one
+    file, depending on the parsed arguments.
+
+    :param args: Parsed arguments, as returned by parse_args().
+    :type args: argparse.Namespace
+    :returns: None.
+    :rtype: None
+    """
     if args.serve or args.file is None:
         port = int(os.getenv("PORT", "8000"))
         app.run(host="0.0.0.0", port=port, debug=False)
     elif args.parallel:
-        out_path = args.out or (args.file + ".json")
-        run_parallel(args.file, out_path, args.n_workers, args.n_threads)
+        run_parallel(args.file, args.out or (args.file + ".json"), args.n_workers, args.n_threads)
     else:
         _cli_process_file(
             in_path=args.file,
@@ -560,3 +577,7 @@ if __name__ == "__main__":
             append=bool(args.append),
             to_stdout=bool(args.stdout),
         )
+
+
+if __name__ == "__main__":
+    main(parse_args())

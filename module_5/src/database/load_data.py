@@ -1,8 +1,8 @@
 """
 `load_data.py`
 Takes cleaned applicant data and loads it into a PostgreSQL database. Run
-directly (`python load_data.py [file.json]`) to load a file; `load_data`
-can also be imported and called on its own.
+from src/ as a module (`python -m database.load_data [file.json]`) to load
+a file; `load_data` can also be imported and called on its own.
 """
 import argparse
 import json
@@ -13,17 +13,9 @@ from datetime import datetime
 from pathlib import Path
 import psycopg
 
-# Ensures db_helpers resolves whether load_data.py is run directly or
-# imported as database.load_data from elsewhere in the package.
-sys.path.insert(0, str(Path(__file__).resolve().parent))
-from db_helpers import connect_db, disconnect_db
-
-# paths.py is a sibling of database/, directly under src/.
-# Imported unconditionally (not just under `if __name__`) since
-# parse_args() needs DEFAULT_DATA_FILE whether or not this module is
-# being run as a script.
-sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+from database.db_helpers import connect_db, disconnect_db
 from paths import DEFAULT_DATA_FILE
+from scraping.storage import validate_filepath
 
 
 REQUIRED_FIELDS = {
@@ -366,53 +358,112 @@ def load_data(filepath, database_url: str):
         completed one.
     :rtype: bool
     """
-    try:
-        with open(filepath, "r") as f:
-            results = json.load(f)
-    except FileNotFoundError:
-        print(f"Could not find the file '{filepath}'. Check the path and try again.")
-        return False
-    except json.JSONDecodeError as error:
-        print(f"'{filepath}' is not valid JSON: {error}")
+    results = _read_results(filepath)
+    if results is None:
         return False
     conn = connect_db(database_url)
     if conn is None:
         return False
 
+    valid_rows, failed_ids = _build_rows(results)
+    try:
+        inserted_urls, updated_urls = _upsert_and_clean(conn, valid_rows)
+    finally:
+        disconnect_db(conn)
+
+    _print_load_summary(len(inserted_urls), len(updated_urls), failed_ids)
+    return True
+
+
+def _read_results(filepath):
+    """
+    Read the JSON results file, printing a readable message instead of
+    raising if it is missing or malformed.
+
+    :param filepath: Path to the JSON results file to read.
+    :type filepath: str or pathlib.Path
+    :returns: The parsed results, or None if the file could not be read.
+    :rtype: list[dict] or None
+    """
+    try:
+        with open(filepath, "r", encoding="utf-8") as f:
+            return json.load(f)
+    except FileNotFoundError:
+        print(f"Could not find the file '{filepath}'. Check the path and try again.")
+    except json.JSONDecodeError as error:
+        print(f"'{filepath}' is not valid JSON: {error}")
+    return None
+
+
+def _build_rows(results):
+    """
+    Validate every scraped result, separating rows ready for insertion
+    from the identifiers of results that failed validation.
+
+    :param results: The raw scraped results.
+    :type results: list[dict]
+    :returns: A tuple of (valid rows, failed result ids or urls).
+    :rtype: tuple(list[dict], list)
+    """
     valid_rows = []
     failed_ids = []
-
     for result in results:
         try:
             valid_rows.append(_build_row(result))
         except InvalidResult:
-            failed_ids.append(_extract_result_id(result.get("url")) or result.get("url", "unknown url"))
+            # fall back to the raw url, then a placeholder, so every
+            # skipped result is still identifiable in the report
+            failed_ids.append(
+                _extract_result_id(result.get("url")) or result.get("url", "unknown url")
+            )
+    return valid_rows, failed_ids
 
+
+def _upsert_and_clean(conn, valid_rows):
+    """
+    Upsert every valid row in BATCH_SIZE batches, then clean score and
+    nationality values across the whole table, all in one transaction.
+
+    :param conn: An open database connection.
+    :type conn: psycopg.Connection
+    :param valid_rows: The validated rows to upsert.
+    :type valid_rows: list[dict]
+    :returns: A tuple of (set of newly inserted urls, set of updated urls).
+    :rtype: tuple(set, set)
+    """
     inserted_urls = set()
     updated_urls = set()
-    try:
-        with conn:
-            with conn.cursor() as cursor:
-                for batch in _chunked(valid_rows, BATCH_SIZE):
-                    batch_inserted, batch_updated = _insert_with_fallback(conn, cursor, batch)
-                    inserted_urls |= batch_inserted
-                    updated_urls |= batch_updated
-                _clear_invalid_scores(cursor)
-                _normalize_existing_nationality(cursor)
-    finally:
-        disconnect_db(conn)
+    with conn:
+        with conn.cursor() as cursor:
+            for batch in _chunked(valid_rows, BATCH_SIZE):
+                batch_inserted, batch_updated = _insert_with_fallback(conn, cursor, batch)
+                inserted_urls |= batch_inserted
+                updated_urls |= batch_updated
+            _clear_invalid_scores(cursor)
+            _normalize_existing_nationality(cursor)
+    return inserted_urls, updated_urls
 
-    loaded = len(inserted_urls)
-    updated = len(updated_urls)
+
+def _print_load_summary(loaded, updated, failed_ids):
+    """
+    Print how many results were inserted, updated, and skipped.
+
+    :param loaded: Count of newly inserted results.
+    :type loaded: int
+    :param updated: Count of existing results that were updated.
+    :type updated: int
+    :param failed_ids: Identifiers of results skipped as invalid.
+    :type failed_ids: list
+    :returns: None.
+    :rtype: None
+    """
     skipped_invalid = len(failed_ids)
-
     if failed_ids:
-        print(f"Skipped {skipped_invalid} results with missing or invalid fields, ids: {failed_ids}")
+        print(f"Skipped {skipped_invalid} results with missing or invalid fields, "
+              f"ids: {failed_ids}")
 
     print(f"Loaded {loaded} new results. Updated {updated} existing results with "
           f"new field values. Skipped {skipped_invalid} with missing or invalid fields.")
-
-    return True
 
 
 def parse_args():
@@ -433,17 +484,27 @@ def parse_args():
     return parser.parse_args()
 
 
-if __name__ == "__main__":
-    # scraping/ is a sibling of database/, directly under src/.
-    from scraping.storage import validate_filepath
+def main():
+    """
+    CLI entry point: load the given (or default) results file into
+    PostgreSQL, exiting non-zero if DATABASE_URL is unset or the load
+    could not complete, so shell scripts and CI can detect the failure.
 
+    :raises SystemExit: With code 1 on any unsuccessful load.
+    :returns: None.
+    :rtype: None
+    """
     cli_args = parse_args()
     validate_filepath(cli_args.relative_filepath, must_exist=True)
 
     database_url = os.getenv("DATABASE_URL")
     if not database_url:
-        print("Set the DATABASE_URL environment variable before running load_data.py.")
+        print("Set the DATABASE_URL environment variable before running load_data.")
         sys.exit(1)
 
     if not load_data(cli_args.relative_filepath, database_url):
         sys.exit(1)
+
+
+if __name__ == "__main__":
+    main()

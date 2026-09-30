@@ -1,14 +1,17 @@
 """
 `test_pull_control.py`
 Covers pull_control.py internals not exercised through the HTTP layer in
-test_buttons.py: kill_stale_chrome()'s process-cleanup branches, and
-cancel()'s three possible outcomes.
+test_buttons.py: kill_stale_chrome()'s process-cleanup branches, the
+scraper command start() launches, and cancel()'s three possible outcomes.
 """
+import sys
 from types import SimpleNamespace
 
 import pytest
 
 from app import pull_control
+from helpers import FakeProcess
+from paths import PACKAGE_DIR
 
 
 class _FakeCompletedProcess:
@@ -90,8 +93,8 @@ def test_cancel_terminates_process_still_scraping(monkeypatch):
         poll=lambda: None,
         terminate=lambda: terminated.append(True),
     )
-    monkeypatch.setattr(pull_control, "_process", fake_process)
-    monkeypatch.setattr(pull_control, "_thread", SimpleNamespace(is_alive=lambda: True))
+    monkeypatch.setattr(pull_control._state, "process", fake_process)
+    monkeypatch.setattr(pull_control._state, "thread", SimpleNamespace(is_alive=lambda: True))
 
     result = pull_control.cancel()
 
@@ -105,9 +108,29 @@ def test_cancel_reports_finishing_when_scrape_already_exited(monkeypatch):
     code) but the upload thread is still alive, there's nothing left to
     cancel except waiting for the upload."""
     fake_process = SimpleNamespace(poll=lambda: 0, terminate=lambda: None)
-    monkeypatch.setattr(pull_control, "_process", fake_process)
-    monkeypatch.setattr(pull_control, "_thread", SimpleNamespace(is_alive=lambda: True))
+    monkeypatch.setattr(pull_control._state, "process", fake_process)
+    monkeypatch.setattr(pull_control._state, "thread", SimpleNamespace(is_alive=lambda: True))
 
     result = pull_control.cancel()
 
     assert result == "finishing"
+
+
+@pytest.mark.buttons
+def test_start_launches_scraper_as_module_from_src(monkeypatch):
+    """The scraper uses package imports, so it must run as a module with
+    src/ as its working directory, using this process's interpreter."""
+    popen_calls = []
+    monkeypatch.setattr(
+        "app.pull_control.subprocess.Popen",
+        lambda args, **kwargs: popen_calls.append((args, kwargs)) or FakeProcess(),
+    )
+    monkeypatch.setattr("app.pull_control.load_data", lambda filepath, url: True)
+
+    assert pull_control.start("/fake/chrome", "postgresql://unused") is True
+    pull_control._state.thread.join(timeout=2)
+
+    command, kwargs = popen_calls[0]
+    assert command[:3] == [sys.executable, "-m", pull_control.SCRAPE_MODULE]
+    assert command[command.index("--chrome_binary") + 1] == "/fake/chrome"
+    assert kwargs["cwd"] == PACKAGE_DIR

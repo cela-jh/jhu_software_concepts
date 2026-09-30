@@ -1,0 +1,140 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
+    <title>Module 3 Analysis</title>
+</head>
+<body data-pull-running="{{ 'true' if pull_running else 'false' }}">
+    <header>Cameron Ela - Module 3 Grad School Cafe Data Analysis</header>
+    <hr class="divider">
+    <div class="controls">
+        <h1>Analysis</h1>
+        <div class="buttons">
+            <button id="pull-button" data-testid="pull-data-btn" type="button">Pull Data</button>
+            <button id="update-button" data-testid="update-analysis-btn" type="button">Update Analysis</button>
+        </div>
+    </div>
+    <p class="explanation">
+        Pull Data checks Grad Cafe for newly submitted application results
+        and adds new records to the database. It scrapes from the newest
+        entries until it reaches ones already in the database, or until
+        cancelled, so it may take some time depending on how much new data
+        is available.
+    </p>
+    <p id="status-message" class="status-message"></p>
+    <div id="log-box" class="log-box" hidden>
+        {% for line in pull_lines %}
+        <p class="log-line">{{ line }}</p>
+        {% endfor %}
+    </div>
+    <div class="results">
+        {% for question, answer in results %}
+        <div class="result-box">
+            <p class="question">{{ question }}</p>
+            <p class="answer">Answer: {{ answer }}</p>
+        </div>
+        {% endfor %}
+    </div>
+    <script>
+        const pullButton = document.getElementById("pull-button");
+        const updateButton = document.getElementById("update-button");
+        const statusMessage = document.getElementById("status-message");
+        const logBox = document.getElementById("log-box");
+        let pollTimer = null;
+
+        function showLines(lines) {
+            logBox.innerHTML = "";
+            lines.forEach((line) => {
+                const p = document.createElement("p");
+                p.className = "log-line";
+                p.textContent = line;
+                logBox.appendChild(p);
+            });
+            logBox.hidden = lines.length === 0;
+        }
+
+        function setRunningUi(running) {
+            pullButton.textContent = running ? "Cancel" : "Pull Data";
+            pullButton.disabled = false;
+        }
+
+        function poll() {
+            fetch("/pull/status")
+                .then((response) => response.json())
+                .then((data) => {
+                    showLines(data.lines);
+                    if (data.running) {
+                        setRunningUi(true);
+                    } else {
+                        setRunningUi(false);
+                        stopPolling();
+                        if (data.lines.length > 0) {
+                            statusMessage.textContent = "Pull finished. Reloading with the latest data...";
+                            setTimeout(() => window.location.reload(), 1500);
+                        }
+                    }
+                });
+        }
+
+        function startPolling() {
+            if (pollTimer === null) {
+                pollTimer = setInterval(poll, 1500);
+            }
+        }
+
+        function stopPolling() {
+            if (pollTimer !== null) {
+                clearInterval(pollTimer);
+                pollTimer = null;
+            }
+        }
+
+        pullButton.addEventListener("click", () => {
+            pullButton.disabled = true;
+            if (pullButton.textContent === "Cancel") {
+                statusMessage.textContent = "";
+                fetch("/pull/cancel", { method: "POST" })
+                    .then((response) => response.json())
+                    .then((data) => {
+                        statusMessage.textContent = data.message;
+                        pullButton.disabled = false;
+                    });
+            } else {
+                statusMessage.textContent = "";
+                fetch("/pull-data", { method: "POST" })
+                    .then((response) => response.json())
+                    .then((data) => {
+                        statusMessage.textContent = data.message;
+                        pullButton.disabled = false;
+                        if (data.ok || data.busy) {
+                            setRunningUi(true);
+                            startPolling();
+                        }
+                    });
+            }
+        });
+
+        updateButton.addEventListener("click", () => {
+            updateButton.disabled = true;
+            statusMessage.textContent = "";
+            fetch("/update-analysis", { method: "POST" })
+                .then((response) => response.json().then((data) => ({ ok: response.ok, data })))
+                .then(({ ok, data }) => {
+                    if (ok) {
+                        window.location.reload();
+                    } else {
+                        statusMessage.textContent = data.message;
+                        updateButton.disabled = false;
+                    }
+                });
+        });
+
+        if (document.body.dataset.pullRunning === "true") {
+            setRunningUi(true);
+            startPolling();
+        }
+    </script>
+</body>
+</html>

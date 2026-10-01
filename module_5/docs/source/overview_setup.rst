@@ -50,20 +50,20 @@ Setup
    - Windows: ``C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe``
    - Linux: usually ``google-chrome`` on PATH
 
-4. Set the ``DATABASE_URL`` environment variable to a
-   ``postgresql://user:password@host:port/dbname`` connection string.
-   ``load_data.py``, ``run.py``, ``query_data.py``, and ``orm_queries.py``
-   all read it from the environment at runtime:
+4. Create the least-privilege role the app connects as (``SELECT``,
+   ``INSERT``, ``UPDATE`` on ``applicants`` only), then set its password;
+   psql prompts for it, so it never appears in a file:
 
    .. code-block:: console
 
-      export DATABASE_URL=postgresql://your_postgres_user:your_postgres_password@localhost:5432/cam_db
+      psql -d <your_database_name> -f least_privilege.sql
+      psql -d <your_database_name> -c "\password gradcafe_app"
 
-   On a locally trust-authed PostgreSQL install, the password segment
-   can be omitted entirely: ``postgresql://your_postgres_user@localhost:5432/cam_db``.
-
-5. ``run.py``'s Pull Data button also needs ``CHROME_BINARY`` set to the
-   path from step 3.
+5. Copy ``.env.example`` to ``.env`` and fill in ``DB_HOST``,
+   ``DB_PORT``, ``DB_NAME``, ``DB_USER`` (``gradcafe_app``),
+   ``DB_PASSWORD``, and, for Pull Data, ``CHROME_BINARY`` (the path from
+   step 3). ``.env`` is gitignored. ``run.py`` and every CLI load it at
+   startup; variables already exported in your shell take precedence.
 
 Running the app
 ----------------
@@ -72,7 +72,7 @@ Every command in this section and the next runs from ``module_5/src``.
 
 .. code-block:: console
 
-   DATABASE_URL=postgresql://youruser:yourpassword@localhost:5432/yourdb CHROME_BINARY="<path to Chrome>" python run.py [--file path/to/results.json]
+   python run.py [--file path/to/results.json]
 
 Open http://127.0.0.1:5000/analysis. Every answer is read live from
 PostgreSQL on each page load; if PostgreSQL itself is unreachable, the
@@ -92,13 +92,13 @@ their package imports resolve from ``src/``.
    python -m scraping.scrape --num_results <N> --chrome_binary "<path to Chrome>" [output.json]
 
    # Loading into PostgreSQL
-   DATABASE_URL=postgresql://youruser:yourpassword@localhost:5432/yourdb python -m database.load_data <file.json>
+   python -m database.load_data <file.json>
 
    # Part 2 SQL analysis
-   DATABASE_URL=postgresql://youruser:yourpassword@localhost:5432/yourdb python -m database.query_data
+   python -m database.query_data
 
    # Part 6 SQLAlchemy ORM analysis
-   DATABASE_URL=postgresql://youruser:yourpassword@localhost:5432/yourdb python -m database.orm_queries
+   python -m database.orm_queries
 
 Running the tests
 ------------------

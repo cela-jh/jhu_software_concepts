@@ -225,7 +225,7 @@ def test_cli_exits_nonzero_when_database_unreachable(tmp_path):
         [sys.executable, "-m", "database.load_data", str(data_file)],
         env={
             **os.environ,
-            "DATABASE_URL": "postgresql://localhost:5432/definitely_not_a_real_database",
+            "DB_NAME": "definitely_not_a_real_database",
         },
         cwd=SRC_DIR, capture_output=True, text=True, check=False,
     )
@@ -242,23 +242,24 @@ def cli_data_file(tmp_path, monkeypatch):
     data_file = tmp_path / "applicant_data.json"
     data_file.write_text(json.dumps([fake_applicant_row(9999998)]))
     monkeypatch.setattr("sys.argv", ["load_data.py", str(data_file)])
+    # never let a developer's real module_5/.env fill in variables a test removed
+    monkeypatch.setattr(load_data, "load_env_file", lambda: None)
     return data_file
 
 
 @pytest.mark.db
-def test_main_exits_nonzero_when_database_url_unset(cli_data_file, monkeypatch, capsys):
-    monkeypatch.delenv("DATABASE_URL", raising=False)
+def test_main_exits_nonzero_when_database_config_missing(cli_data_file, monkeypatch, capsys):
+    monkeypatch.delenv("DB_HOST", raising=False)
 
     with pytest.raises(SystemExit) as exit_info:
         load_data.main()
 
     assert exit_info.value.code == 1
-    assert "DATABASE_URL" in capsys.readouterr().out
+    assert "DB_HOST" in capsys.readouterr().out
 
 
 @pytest.mark.db
 def test_main_exits_nonzero_when_load_fails(cli_data_file, monkeypatch):
-    monkeypatch.setenv("DATABASE_URL", "postgresql://unused")
     monkeypatch.setattr(load_data, "load_data", lambda filepath, url: False)
 
     with pytest.raises(SystemExit) as exit_info:
@@ -268,12 +269,12 @@ def test_main_exits_nonzero_when_load_fails(cli_data_file, monkeypatch):
 
 
 @pytest.mark.db
-def test_main_returns_normally_when_load_succeeds(cli_data_file, monkeypatch):
-    monkeypatch.setenv("DATABASE_URL", "postgresql://unused")
+def test_main_returns_normally_when_load_succeeds(cli_data_file, monkeypatch, database_url):
     load_calls = []
     monkeypatch.setattr(load_data, "load_data",
                         lambda filepath, url: load_calls.append((filepath, url)) or True)
 
     load_data.main()
 
-    assert load_calls == [(cli_data_file, "postgresql://unused")]
+    # main() builds its URL from the same DB_* variables conftest set
+    assert load_calls == [(cli_data_file, database_url)]

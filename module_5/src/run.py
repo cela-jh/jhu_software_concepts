@@ -7,6 +7,7 @@ import atexit
 from pathlib import Path
 
 from app import app, pull_control, routes
+from database.db_helpers import load_env_file
 from paths import DEFAULT_DATA_FILE
 
 
@@ -29,6 +30,9 @@ def parse_args():
 
 
 if __name__ == "__main__":
+    # DB_* credentials (and CHROME_BINARY) from module_5/.env, unless
+    # already exported in the shell
+    load_env_file()
     cli_args = parse_args()
     # Both reference this as a plain module-level global looked up at call
     # time, so reassigning it here before the server starts propagates to

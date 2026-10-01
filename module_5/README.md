@@ -16,7 +16,7 @@ Cameron Ela, cela1@jh.edu
 8. [Local LLM Standardization](#8-local-llm-standardization)
 9. [Robots.txt Compliance](#9-robotstxt-compliance)
 10. [Known Bugs / Limitations](#10-known-bugs--limitations)
-11. [Linting (Pylint)](#11-linting-pylint)
+11. [Linting and Dependency Graph](#11-linting-and-dependency-graph)
 12. [Testing](#12-testing)
 13. [Documentation](#13-documentation)
 14. [Citations](#14-citations)
@@ -86,16 +86,16 @@ Every module imports its dependencies by their full package path rooted at `src/
    - macOS: `/Applications/Google Chrome.app/Contents/MacOS/Google Chrome`
    - Windows: `C:\Program Files\Google\Chrome\Application\chrome.exe`
    - Linux: usually `google-chrome` on PATH
-5. Set `DATABASE_URL` (needed for `load_data.py`, `run.py`, `query_data.py`, `orm_queries.py`) to a `postgresql://user:password@host:port/dbname` connection string:
+5. Create the least-privilege role the app connects as (see [Credentials and least privilege](#credentials-and-least-privilege)), then set its password; psql prompts for it, so it never appears in a file or your shell history:
    ```
-   export DATABASE_URL=postgresql://your_postgres_user:your_postgres_password@localhost:5432/cam_db
+   psql -d <your_database_name> -f least_privilege.sql
+   psql -d <your_database_name> -c "\password gradcafe_app"
    ```
-   On a locally trust-authed PostgreSQL install (no password needed), the password segment can be omitted entirely: `postgresql://your_postgres_user@localhost:5432/cam_db`.
-6. `run.py`'s Pull Data button also needs `CHROME_BINARY` set to the path from step 4.
+6. Copy `.env.example` to `.env` and fill in your values: `DB_HOST`, `DB_PORT`, `DB_NAME`, `DB_USER` (`gradcafe_app`), `DB_PASSWORD`, and, for Pull Data, `CHROME_BINARY` (the path from step 4). `.env` is gitignored. `run.py` and every CLI below load it automatically at startup; variables already exported in your shell take precedence over it.
 
 ## 3. CLI Usage
 
-Each command below is run on its own from `module_5/src`; none depend on a shared entry point. Package scripts run as modules (`python -m package.module`) so their package imports resolve. Every script resolves `data/` from its own file location via `paths.py`, so the default data paths are the same regardless of current directory.
+Each command below is run on its own from `module_5/src`; none depend on a shared entry point. Database credentials come from the `DB_*` variables in `.env` (see [Setup](#2-setup)), never from the command line. Package scripts run as modules (`python -m package.module`) so their package imports resolve. Every script resolves `data/` from its own file location via `paths.py`, so the default data paths are the same regardless of current directory.
 
 **Scraping:**
 ```
@@ -105,17 +105,17 @@ python -m scraping.scrape --num_results <N> --chrome_binary "<path to Chrome>" [
 
 **Loading into PostgreSQL:**
 ```
-DATABASE_URL=postgresql://youruser:yourpassword@localhost:5432/yourdb python -m database.load_data <file.json>
+python -m database.load_data <file.json>
 ```
 Validates every result, skips and reports any missing required fields, and upserts the rest (see [section 6](#6-loading-into-postgresql) for details). Prints a summary of loaded/updated/skipped counts at the end, and exits with a non-zero status if the file couldn't be read or the database couldn't be reached at all, so a calling script or CI step can tell an unsuccessful load apart from a completed one.
 
-**Running the Part 2 SQL analysis:** `DATABASE_URL=postgresql://youruser:yourpassword@localhost:5432/yourdb python -m database.query_data`
+**Running the Part 2 SQL analysis:** `python -m database.query_data`
 
-**Running the Part 6 SQLAlchemy ORM analysis:** `DATABASE_URL=postgresql://youruser:yourpassword@localhost:5432/yourdb python -m database.orm_queries`
+**Running the Part 6 SQLAlchemy ORM analysis:** `python -m database.orm_queries`
 
 **Running the analysis webpage:**
 ```
-DATABASE_URL=postgresql://youruser:yourpassword@localhost:5432/yourdb CHROME_BINARY="<path to Chrome>" python run.py [--file path/to/results.json]
+python run.py [--file path/to/results.json]
 ```
 Open http://127.0.0.1:5000/analysis. Every answer is read live from PostgreSQL through the `Applicant` model on each page load; if PostgreSQL itself is unreachable, the page shows a plain "database is currently unavailable" message (HTTP 503) rather than crashing. `CHROME_BINARY` is only needed for Pull Data. `--file` is optional and defaults to `data/applicant_data.json`; when set, both Pull Data (what it writes to and loads from) and Update Analysis (what it re-syncs) use that file instead - for example, pointing at `data/llm_extend_applicant_data.json` to keep the LLM-standardized fields flowing through Update Analysis.
 
@@ -171,26 +171,25 @@ Every function listed is public (no leading underscore).
 
 ### `database/load_data.py`
 - `load_data(filepath, database_url)` - Reads a JSON file and loads it into PostgreSQL: skips and collects ids for results missing a required field, converts/validates dates and GPA/GRE values, upserts valid results in batches, and prints a load/update/skip summary. Returns `True` if the file was read and the database was reached, `False` otherwise (used by the CLI entry point to exit non-zero on failure rather than always exiting 0). See [section 6](#6-loading-into-postgresql) for the full logic.
-- `parse_args()` - Optional positional filepath (default `paths.DEFAULT_DATA_FILE`). Reads `DATABASE_URL` from the environment when run directly, exiting with a message (and non-zero status) if it's unset or the load itself fails.
+- `parse_args()` - Optional positional filepath (default `paths.DEFAULT_DATA_FILE`). When run directly, `main()` loads `.env` and builds the connection from the `DB_*` variables, exiting with a message (and non-zero status) if any are missing or the load itself fails.
 
 ### `database/query_data.py`
 Holds `QUESTION_QUERY`, the list of (question, `Query`, format_result) tuples for the Part 2 analysis, where each `Query` pairs a composed `sql.SQL` statement with its bound parameters. `CLI_QUESTION_QUERY` adds A3 for the default school.
 - `normalize_school(raw_school)` / `build_accepted_since_query(school)` / `fetch_accepted_since(database_url, school)` - Validate the A3 school input, compose its statement, and run it, returning one formatted line per result.
 - `analyze(question_query, database_url)` - Runs each query and prints its formatted answer; a failing query prints its error in place without stopping the rest.
-- `_database_url()` - Reads `DATABASE_URL` from the environment, raising `EnvironmentError` if it's unset.
 
 ### `database/models.py`
 - `Applicant` - SQLAlchemy model mapping the same `applicants` table `load_data.py` writes to (`p_id` as primary key). No separate table or copy of data is created.
-- `get_engine(database_url)` / `get_session(database_url)` - Build a SQLAlchemy engine/session from a `DATABASE_URL`-style connection string, selecting the `psycopg` driver explicitly.
+- `get_engine(database_url)` / `get_session(database_url)` - Build a SQLAlchemy engine/session from the connection URL `db_helpers.database_url_from_env()` builds, selecting the `psycopg` driver explicitly.
 
 ### `database/orm_queries.py`
 - `orm_q1` through `orm_q9`, `orm_a1`, `orm_a2` - Repeat the matching Part 2 question with SQLAlchemy's `select()`/`where()`/`func()`/`and_()`/`or_()`, returning the same formatted answer as `query_data.py`. Term/status/nationality comparisons use case-insensitive `ilike()` rather than `==`, so a mixed-case value (e.g. "fall 2026") still matches; percentage denominators are computed independently of whatever column the numerator's `CASE` expression checks, so a blank or unusual value in that column doesn't silently drop a row from the total. `ALL_ORM_ANSWERS` lists all eleven for `run.py`; `ORM_QUESTIONS` lists Q1, Q4, Q5, Q8, Q9, and A1 for `run_orm_queries()`.
-- `run_orm_queries(database_url)` / `_database_url()` - Same pattern as `query_data.py`.
+- `run_orm_queries(database_url)` - Prints the answer to each question in `ORM_QUESTIONS`.
 
 `run.py` imports and runs the Flask app from `app/`, calling `pull_control.kill_stale_chrome()` on startup and shutdown so an orphaned Chrome process never blocks the next Pull Data click.
 
 ### `app/routes.py`
-- `analysis()` - Route for `/analysis`. Runs every `orm_queries.ALL_ORM_ANSWERS` function against a fresh SQLAlchemy session, pairs each with its question text, and renders `analysis.html` with the Pull Data button's current state. Returns a plain error message if `DATABASE_URL` is unset (500), or a plain "database unavailable" message if PostgreSQL can't actually be reached (503), rather than an unhandled crash either way.
+- `analysis()` - Route for `/analysis`. Runs every `orm_queries.ALL_ORM_ANSWERS` function against a fresh SQLAlchemy session, pairs each with its question text, and renders `analysis.html` with the Pull Data button's current state. Returns a plain error message naming any missing `DB_*` variable (500), or a plain "database unavailable" message if PostgreSQL can't actually be reached (503), rather than an unhandled crash either way.
 - `pull_start()` / `pull_cancel()` / `pull_status()` - Routes behind the Pull Data button (`POST /pull-data`, `POST /pull/cancel`, `GET /pull/status`), handing off to `pull_control` and returning JSON status. `pull_start()` and `update_analysis()` both include `ok`/`busy` boolean keys in their JSON responses alongside the existing `status`/`message` fields.
 
 ### `app/pull_control.py`
@@ -231,9 +230,20 @@ CREATE TABLE IF NOT EXISTS applicants (
 
 `p_id` is a plain integer, not auto-incrementing, derived from the numeric GradCafe result id in each entry's url (e.g. `.../result/1020482` becomes `p_id` 1020482), so the same result always gets the same `p_id`. `url` is `UNIQUE NOT NULL` so PostgreSQL enforces "no duplicate results" itself.
 
-### Credentials
+### Credentials and least privilege
 
-PostgreSQL credentials are never hardcoded and are always passed as a single `DATABASE_URL` connection string (`postgresql://user:password@host:port/dbname`). `load_data.py`, `run.py`, `query_data.py`, and `orm_queries.py` all read it from the environment at runtime rather than a CLI flag, since a flag's value is visible to other users (via `ps`) and saved in shell history. This also means tests can point the whole application at a different database (`cam_db_test`, in this project's own test suite) just by setting `DATABASE_URL` differently, with no other configuration to override.
+No credentials appear anywhere in the code. `db_helpers.database_url_from_env()` builds the connection from `DB_HOST`, `DB_PORT`, `DB_NAME`, `DB_USER`, and `DB_PASSWORD` (blank allowed for servers that don't require one), escaping each part, and stops with a message naming every missing variable instead of falling back to a default. `run.py` and each CLI call `db_helpers.load_env_file()` first, which reads `module_5/.env` without overriding anything already exported. `.env` is gitignored; `.env.example` lists the variables with placeholder values. Credentials are read from the environment rather than CLI flags, since a flag's value is visible to other users (via `ps`) and saved in shell history.
+
+The app connects as `gradcafe_app`, a role created by `least_privilege.sql` with only what the app uses:
+
+| Privilege | Why |
+|---|---|
+| `LOGIN`, `CONNECT` on the database, `USAGE` on schema `public` | Connect and find the `applicants` table |
+| `SELECT` on `applicants` | Every analysis query, A3, and the upsert's conflict check |
+| `INSERT` on `applicants` | New results from Pull Data, Update Analysis, and `load_data` |
+| `UPDATE` on `applicants` | Upserting existing results, and the score/nationality cleanup |
+
+It is explicitly `NOSUPERUSER NOCREATEDB NOCREATEROLE NOREPLICATION NOBYPASSRLS`, has no `DELETE`, `TRUNCATE`, `REFERENCES`, or `TRIGGER`, can't create objects in `public`, and doesn't own the table, so it can't `DROP` or `ALTER` it. Reading alone wouldn't be enough: the database checks the connecting role, not which button was pressed, and Pull Data and Update Analysis write through the same role. The table itself stays owned by the administrative account used to run `schema.sql` and `least_privilege.sql`.
 
 ### Validation and missing values
 
@@ -333,7 +343,9 @@ GradCafe's robots.txt was reviewed manually before writing any scraping code and
 - `storage.py`'s `save_data()` assumes the file it's appending to ends in exactly the bytes it last wrote; a file edited by hand or another tool afterward could break that assumption.
 - If `run.py` is restarted mid-pull, `pull_control`'s in-memory state is lost and the page shows Pull Data as idle even though the old Chrome process may still be running. Restart cleans up that orphaned Chrome process first, so only the tracking of that run is lost.
 
-## 11. Linting (Pylint)
+## 11. Linting and Dependency Graph
+
+### Pylint
 
 Every Python file under `src/` scores 10.00/10 with Pylint's default settings, with no errors or warnings. Code outside `src/` (tests, docs) is not linted. From `module_5`, with the virtual environment active:
 
@@ -349,13 +361,23 @@ A few inline `# pylint: disable=...` comments remain, each on a single line with
 - `consider-using-with` where a subprocess or file must outlive the function that opens it (the Pull Data scraper, Chrome, the LLM workers, and the standardizer's output file, which the caller's own `with` block closes).
 - `too-few-public-methods` on the SQLAlchemy model classes, which declare columns rather than methods.
 
+### Dependency graph (pydeps + Graphviz)
+
+`dependency.svg` in `module_5` maps the import graph starting from the Flask entry point, `src/run.py`. It needs `pydeps` (installed from `requirements.txt`) and Graphviz's `dot` on your PATH (`brew install graphviz` on macOS, `sudo apt-get install graphviz` on Ubuntu). From `module_5/src`:
+
+```
+pydeps run.py --noshow -T svg --max-bacon 3 --max-module-depth 2 -o ../dependency.svg
+```
+
+`--max-bacon 3` follows imports three hops from `run.py`, enough to reach every project module (including `scraping.clean`/`storage`, which `run.py` only reaches through `pull_control` and `scrape`) and the libraries they use directly. `--max-module-depth 2` collapses each library's internal submodules (for example every `sqlalchemy.engine.*` module into one `sqlalchemy.engine` node), so the project's own modules stay readable next to the SQLAlchemy and psycopg clusters. `--noshow` skips opening a viewer, so the same command works in CI.
+
 ## 12. Testing
 
 ### Setup
 
 1. Create and activate `module_4/venv`, then `pip install -r requirements.txt` (already covers `pytest`, `pytest-cov`, `pytest-randomly`, and every runtime dependency, including `llm_hosting`'s).
-2. Create a disposable `cam_db_test` PostgreSQL database and load the same schema as `cam_db`: `psql -d cam_db_test -f schema.sql` (see [section 6](#6-loading-into-postgresql)) - the test suite never touches `cam_db`'s real data. If `DATABASE_URL` is already set (as CI sets it, pointing at its own Postgres service container), `tests/conftest.py` uses it as-is; otherwise it builds one pointing at `cam_db_test` from the current OS user (`postgresql://<user>@localhost:5432/cam_db_test`, via `getpass.getuser()` rather than a hardcoded name, so local runs work on whatever machine the suite runs on) and sets it as the `DATABASE_URL` environment variable for the whole test session. Either way, `db_connection` refuses to run unless `cam_db_test` appears in the connection string, so a misconfigured override can never truncate real data.
-3. Local trust-authed PostgreSQL doesn't check the password's contents at all, which is why the test `DATABASE_URL` omits one entirely.
+2. Create a disposable `cam_db_test` PostgreSQL database and load the same schema as `cam_db`: `psql -d cam_db_test -f schema.sql` (see [section 6](#6-loading-into-postgresql)) - the test suite never touches `cam_db`'s real data. `tests/conftest.py` always sets `DB_NAME=cam_db_test`, whatever your shell exports, and never loads `.env`. `DB_HOST`, `DB_PORT`, `DB_USER`, and `DB_PASSWORD` are used as-is when set (as CI sets them for its own Postgres service container); otherwise they default to `localhost`, `5432`, the current OS user (via `getpass.getuser()` rather than a hardcoded name, so local runs work on whatever machine the suite runs on), and a blank password. `db_connection` also refuses to run unless `cam_db_test` appears in the connection URL, so a misconfigured override can never truncate real data.
+3. The suite truncates `applicants` between tests, so it connects as the table's owner, not as `gradcafe_app` (which deliberately has no `TRUNCATE`). Local trust-authed PostgreSQL doesn't check passwords at all, which is why the default test password is blank.
 
 ### Running the suite
 

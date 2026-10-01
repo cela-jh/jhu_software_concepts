@@ -185,10 +185,10 @@ def test_pull_start_returns_error_when_chrome_binary_missing(client, monkeypatch
 
 @pytest.mark.buttons
 def test_pull_start_returns_error_when_credentials_missing(client, monkeypatch):
-    """POST /pull-data should report a clear error when DATABASE_URL
-    isn't set, even with CHROME_BINARY present."""
+    """POST /pull-data should report a clear error naming the missing
+    DB_* variable, even with CHROME_BINARY present."""
     monkeypatch.setenv("CHROME_BINARY", "/fake/chrome")
-    monkeypatch.delenv("DATABASE_URL", raising=False)
+    monkeypatch.delenv("DB_HOST", raising=False)
 
     response = client.post("/pull-data")
 
@@ -196,14 +196,14 @@ def test_pull_start_returns_error_when_credentials_missing(client, monkeypatch):
     body = response.get_json()
     assert body["ok"] is False
     assert body["status"] == "error"
-    assert "DATABASE_URL" in body["message"]
+    assert "DB_HOST" in body["message"]
 
 
 @pytest.mark.buttons
 def test_update_analysis_returns_error_when_credentials_missing(client, monkeypatch):
     """POST /update-analysis should report a clear 500 error, and never
-    call load_data, when DATABASE_URL isn't set."""
-    monkeypatch.delenv("DATABASE_URL", raising=False)
+    call load_data, when a DB_* variable isn't set."""
+    monkeypatch.delenv("DB_USER", raising=False)
     load_calls = []
     monkeypatch.setattr(
         "app.routes.load_data",

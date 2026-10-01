@@ -1,13 +1,26 @@
 """
 `db_helpers.py`
-Reusable functions for connecting to and disconnecting from PostgreSQL,
-plus the shared safety settings every query is built with: the table
-identifier, the enforced row limit, and LIKE pattern escaping.
+Reusable functions for reading database credentials from the environment
+and connecting to and disconnecting from PostgreSQL, plus the shared
+safety settings every query is built with: the table identifier, the
+enforced row limit, and LIKE pattern escaping.
 """
+import os
 import re
+from pathlib import Path
+
 import psycopg
 from psycopg import sql
 from psycopg.rows import dict_row
+from sqlalchemy.engine import URL
+
+from paths import ENV_FILE
+
+# Credentials come only from these environment variables (optionally
+# loaded from ENV_FILE), never from code. DB_PASSWORD may be left blank
+# for servers that authenticate without one.
+REQUIRED_DB_VARS = ("DB_HOST", "DB_PORT", "DB_NAME", "DB_USER")
+DB_PASSWORD_VAR = "DB_PASSWORD"
 
 APPLICANTS_TABLE_NAME = "applicants"
 # Quoted by psycopg wherever it is composed into SQL, never pasted as text.
@@ -26,6 +39,68 @@ LIKE_ESCAPE = "\\"
 
 class DatabaseUnavailableError(Exception):
     """Raised when a connection to PostgreSQL cannot be opened."""
+
+
+class DatabaseConfigError(EnvironmentError):
+    """Raised when the DB_* environment variables are missing or invalid."""
+
+
+def load_env_file(path=ENV_FILE):
+    """
+    Load KEY=VALUE lines from a .env file into the environment, if the
+    file exists. Variables already set in the environment win, so a
+    real export always overrides the file. Blank lines, comments, and an
+    optional leading "export " are allowed, and matching single or
+    double quotes around a value are removed.
+
+    :param path: The .env file to read.
+    :type path: str or pathlib.Path
+    :returns: None.
+    :rtype: None
+    """
+    path = Path(path)
+    if not path.is_file():
+        return
+    for line in path.read_text(encoding="utf-8").splitlines():
+        line = line.strip()
+        if not line or line.startswith("#") or "=" not in line:
+            continue
+        key, value = line.split("=", 1)
+        key = key.removeprefix("export ").strip()
+        value = value.strip()
+        if len(value) >= 2 and value[0] == value[-1] and value[0] in "'\"":
+            value = value[1:-1]
+        os.environ.setdefault(key, value)
+
+
+def database_url_from_env():
+    """
+    Build the PostgreSQL connection URL from the DB_* environment
+    variables. SQLAlchemy's URL builder escapes each part, so a password
+    containing characters such as "@" or "/" still connects correctly.
+
+    :raises DatabaseConfigError: If a required variable is unset, naming
+        each missing one, or if DB_PORT isn't a number.
+    :returns: A "postgresql://user:password@host:port/dbname" URL.
+    :rtype: str
+    """
+    missing = [name for name in REQUIRED_DB_VARS if not os.getenv(name)]
+    if missing:
+        raise DatabaseConfigError(
+            f"Set {', '.join(missing)} (and {DB_PASSWORD_VAR} if your server "
+            f"requires one) before running; see .env.example."
+        )
+    port = os.environ["DB_PORT"]
+    if not port.isdigit():
+        raise DatabaseConfigError(f"DB_PORT must be a number, not {port!r}.")
+    return URL.create(
+        "postgresql",
+        username=os.environ["DB_USER"],
+        password=os.getenv(DB_PASSWORD_VAR) or None,
+        host=os.environ["DB_HOST"],
+        port=int(port),
+        database=os.environ["DB_NAME"],
+    ).render_as_string(hide_password=False)
 
 
 def clamp_limit(limit):
@@ -114,9 +189,8 @@ def connect_db(database_url: str):
     try:
         return psycopg.connect(database_url)
     except psycopg.DatabaseError as error:
-        print(f"Could not connect to the database. Check DATABASE_URL "
-              f"(database name, host, port, username, and password) and "
-              f"try again. Details: {error}")
+        print(f"Could not connect to the database. Check DB_HOST, DB_PORT, "
+              f"DB_NAME, DB_USER, and DB_PASSWORD and try again. Details: {error}")
         return None
 
 

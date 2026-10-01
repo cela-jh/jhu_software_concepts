@@ -2,18 +2,20 @@
 `orm_queries.py`
 Repeats a subset of the Part 2 SQL analysis using the SQLAlchemy ORM
 instead of handwritten SQL. Run from src/ as a module
-(`python -m database.orm_queries`, with DATABASE_URL set) to print every
+(`python -m database.orm_queries`, with the DB_* variables set) to print every
 answer.
 """
 # SQLAlchemy builds func.<name> SQL functions dynamically at runtime, so
 # static analysis cannot see that func.count is callable.
 # pylint: disable=not-callable
-import os
 import sys
 
 from sqlalchemy import Integer, Numeric, and_, case, cast, func, or_, select
 
-from database.db_helpers import LIKE_ESCAPE, escape_like, query_limit
+from database.db_helpers import (
+    LIKE_ESCAPE, DatabaseConfigError, database_url_from_env, escape_like, load_env_file,
+    query_limit,
+)
 from database.models import Applicant, get_session
 from database.query_data import (
     ACCEPTED_PATTERN, ACCEPTED_SINCE_YEAR, LISTED_UNIVERSITIES,
@@ -442,25 +444,10 @@ def run_orm_queries(database_url: str):
         session.close()
 
 
-def _database_url():
-    """
-    Read the DATABASE_URL environment variable.
-
-    :raises EnvironmentError: If it isn't set.
-    :returns: The connection string.
-    :rtype: str
-    """
-    database_url = os.getenv("DATABASE_URL")
-    if not database_url:
-        raise EnvironmentError(
-            "Set the DATABASE_URL environment variable before running this script."
-        )
-    return database_url
-
-
 if __name__ == "__main__":
+    load_env_file()
     try:
-        run_orm_queries(_database_url())
-    except EnvironmentError as error:
+        run_orm_queries(database_url_from_env())
+    except DatabaseConfigError as error:
         print(error)
         sys.exit(1)

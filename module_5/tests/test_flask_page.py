@@ -73,14 +73,14 @@ def test_analysis(client, monkeypatch):
 
 @pytest.mark.web
 def test_analysis_page_returns_500_when_credentials_missing(client, monkeypatch):
-    """GET /analysis should fail clearly, not crash, when DATABASE_URL
-    isn't set - it must never reach get_session() at all."""
-    monkeypatch.delenv("DATABASE_URL", raising=False)
+    """GET /analysis should fail clearly, not crash, when a DB_*
+    variable isn't set - it must never reach get_session() at all."""
+    monkeypatch.delenv("DB_NAME", raising=False)
 
     response = client.get("/analysis")
 
     assert response.status_code == 500
-    assert "DATABASE_URL" in response.get_data(as_text=True)
+    assert "DB_NAME" in response.get_data(as_text=True)
 
 
 @pytest.mark.web

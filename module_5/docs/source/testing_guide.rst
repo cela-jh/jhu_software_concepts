@@ -9,13 +9,14 @@ Setup
    every runtime dependency).
 2. Create a disposable ``cam_db_test`` PostgreSQL database and load the
    schema: ``psql -d cam_db_test -f schema.sql``. The test suite never
-   touches ``cam_db``'s real data. If ``DATABASE_URL`` is already set (as
-   CI sets it, pointing at its own Postgres service container),
-   ``tests/conftest.py`` uses it as-is; otherwise it builds one pointing
-   at ``cam_db_test`` from the current OS user
-   (``postgresql://<user>@localhost:5432/cam_db_test``, via
-   ``getpass.getuser()`` rather than a hardcoded name) and sets it as the
-   ``DATABASE_URL`` environment variable for the whole test session.
+   touches ``cam_db``'s real data: ``tests/conftest.py`` always sets
+   ``DB_NAME=cam_db_test`` and never loads ``.env``. ``DB_HOST``,
+   ``DB_PORT``, ``DB_USER``, and ``DB_PASSWORD`` are used as-is when set
+   (as CI sets them for its own Postgres service container); otherwise
+   they default to ``localhost``, ``5432``, the current OS user (via
+   ``getpass.getuser()`` rather than a hardcoded name), and a blank
+   password. The suite connects as the table owner, since it truncates
+   ``applicants`` between tests and ``gradcafe_app`` has no ``TRUNCATE``.
 
 Running marked tests
 ---------------------
@@ -95,10 +96,10 @@ Defined in ``tests/conftest.py``:
 
 - ``app`` - a fresh Flask app instance (``create_app()``) for a single test.
 - ``client`` - a Flask test client bound to the ``app`` fixture.
-- ``database_url`` - the disposable test database's ``DATABASE_URL`` connection string.
+- ``database_url`` - the disposable test database's connection URL.
 - ``db_connection`` - connects to ``cam_db_test`` and truncates the
   ``applicants`` table before and after the test, refusing to run at all
-  if ``DATABASE_URL`` somehow isn't pointed at the disposable test
+  if the connection somehow isn't pointed at the disposable test
   database.
 - ``reset_pull_control`` (autouse) - resets ``pull_control``'s
   module-level pull-tracking state before and after every test, since

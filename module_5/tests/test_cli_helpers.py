@@ -1,30 +1,15 @@
 """
 `test_cli_helpers.py`
 Covers the CLI-support functions in orm_queries.py and query_data.py that
-only run when each module's script is executed directly: their own
-_database_url() readers, and the functions that print every answer
-(run_orm_queries(), analyze()) against the real cam_db_test database.
+only run when each module's script is executed directly: the functions
+that print every answer (run_orm_queries(), analyze()) against the real
+cam_db_test database.
 """
 import pytest
 from psycopg import sql
 
 import database.orm_queries as orm_queries
 import database.query_data as query_data
-
-
-@pytest.mark.db
-def test_orm_queries_database_url_reads_env_var(monkeypatch, database_url):
-    monkeypatch.setenv("DATABASE_URL", database_url)
-
-    assert orm_queries._database_url() == database_url
-
-
-@pytest.mark.db
-def test_orm_queries_database_url_raises_when_unset(monkeypatch):
-    monkeypatch.delenv("DATABASE_URL", raising=False)
-
-    with pytest.raises(EnvironmentError):
-        orm_queries._database_url()
 
 
 @pytest.mark.db
@@ -36,21 +21,6 @@ def test_run_orm_queries_prints_every_answer(db_connection, database_url, capsys
     printed = capsys.readouterr().out
     assert "Applicant count:" in printed
     assert "No accepted applicants found" in printed
-
-
-@pytest.mark.db
-def test_query_data_database_url_reads_env_var(monkeypatch, database_url):
-    monkeypatch.setenv("DATABASE_URL", database_url)
-
-    assert query_data._database_url() == database_url
-
-
-@pytest.mark.db
-def test_query_data_database_url_raises_when_unset(monkeypatch):
-    monkeypatch.delenv("DATABASE_URL", raising=False)
-
-    with pytest.raises(EnvironmentError):
-        query_data._database_url()
 
 
 @pytest.mark.db

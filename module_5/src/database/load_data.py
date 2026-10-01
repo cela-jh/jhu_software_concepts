@@ -6,7 +6,6 @@ a file; `load_data` can also be imported and called on its own.
 """
 import argparse
 import json
-import os
 import re
 import sys
 from datetime import datetime
@@ -14,7 +13,10 @@ from pathlib import Path
 import psycopg
 from psycopg import sql
 
-from database.db_helpers import APPLICANTS, connect_db, disconnect_db
+from database.db_helpers import (
+    APPLICANTS, DatabaseConfigError, connect_db, database_url_from_env, disconnect_db,
+    load_env_file,
+)
 from paths import DEFAULT_DATA_FILE
 from scraping.storage import validate_filepath
 
@@ -527,8 +529,9 @@ def parse_args():
 def main():
     """
     CLI entry point: load the given (or default) results file into
-    PostgreSQL, exiting non-zero if DATABASE_URL is unset or the load
-    could not complete, so shell scripts and CI can detect the failure.
+    PostgreSQL, exiting non-zero if the DB_* variables are missing or the
+    load could not complete, so shell scripts and CI can detect the
+    failure.
 
     :raises SystemExit: With code 1 on any unsuccessful load.
     :returns: None.
@@ -537,9 +540,11 @@ def main():
     cli_args = parse_args()
     validate_filepath(cli_args.relative_filepath, must_exist=True)
 
-    database_url = os.getenv("DATABASE_URL")
-    if not database_url:
-        print("Set the DATABASE_URL environment variable before running load_data.")
+    load_env_file()
+    try:
+        database_url = database_url_from_env()
+    except DatabaseConfigError as error:
+        print(error)
         sys.exit(1)
 
     if not load_data(cli_args.relative_filepath, database_url):

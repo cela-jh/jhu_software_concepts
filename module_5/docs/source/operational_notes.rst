@@ -69,13 +69,23 @@ Local setup
 ------------
 
 **"could not connect to server" / `connect_db` prints an error and returns None**
-    PostgreSQL isn't running, or ``DATABASE_URL`` points at the wrong host,
-    port, or database name. Confirm the server is up and
-    ``psql "$DATABASE_URL" -c '\dt'`` succeeds on its own before running the
-    app or tests.
+    PostgreSQL isn't running, or one of ``DB_HOST``, ``DB_PORT``,
+    ``DB_NAME``, ``DB_USER``, or ``DB_PASSWORD`` is wrong. Confirm the
+    server is up and ``psql -h "$DB_HOST" -p "$DB_PORT" -U "$DB_USER" -d
+    "$DB_NAME" -c '\dt'`` succeeds on its own before running the app.
+
+**"Set DB_HOST, ... before running"**
+    A required ``DB_*`` variable is missing. Copy ``.env.example`` to
+    ``.env`` in ``module_5`` and fill it in, or export the variables in
+    your shell.
+
+**"permission denied for table applicants"**
+    The app is connected as a role without the needed privilege. Run
+    ``least_privilege.sql`` against that database as the table owner, and
+    check ``DB_USER`` is ``gradcafe_app``.
 
 **`db_connection` fixture raises "Refusing to run db tests against a non-test database"**
-    ``DATABASE_URL`` doesn't contain ``cam_db_test``. This guard exists so a
+    the connection URL doesn't contain ``cam_db_test``. This guard exists so a
     misconfigured environment variable can never point the test suite's
     ``TRUNCATE`` calls at real data; fix the environment variable, don't
     remove the guard.

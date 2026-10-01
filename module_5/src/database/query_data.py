@@ -1,7 +1,7 @@
 """
 `query_data.py`
 Prints answers for Part 2: SQL Query Analysis. Run from src/ as a module
-(`python -m database.query_data`, with DATABASE_URL set) to print every
+(`python -m database.query_data`, with the DB_* variables set) to print every
 answer; `analyze` can also be imported and called on its own.
 
 Every statement here is composed with psycopg's sql module: the table is
@@ -9,7 +9,6 @@ inserted with sql.Identifier, and every value (filter patterns, the
 user's school name, the row limit) is passed separately as a bound
 parameter at execution time, never written into the SQL text.
 """
-import os
 import sys
 from typing import Callable, NamedTuple
 import psycopg
@@ -17,8 +16,9 @@ from psycopg import sql
 from psycopg.rows import dict_row
 
 from database.db_helpers import (
-    APPLICANTS, LIKE_ESCAPE, DatabaseUnavailableError,
-    connect_db, disconnect_db, escape_like, query_limit,
+    APPLICANTS, LIKE_ESCAPE, DatabaseConfigError, DatabaseUnavailableError,
+    connect_db, database_url_from_env, disconnect_db, escape_like, load_env_file,
+    query_limit,
 )
 
 # Filter values shared by the SQL here and the ORM in orm_queries.py.
@@ -537,25 +537,10 @@ def analyze(question_query: list[tuple[str, Query, Callable[[list[dict]], str]]]
         disconnect_db(conn)
 
 
-def _database_url():
-    """
-    Read the DATABASE_URL environment variable.
-
-    :raises EnvironmentError: If it isn't set.
-    :returns: The connection string.
-    :rtype: str
-    """
-    database_url = os.getenv("DATABASE_URL")
-    if not database_url:
-        raise EnvironmentError(
-            "Set the DATABASE_URL environment variable before running this script."
-        )
-    return database_url
-
-
 if __name__ == "__main__":
+    load_env_file()
     try:
-        analyze(CLI_QUESTION_QUERY, _database_url())
-    except EnvironmentError as error:
+        analyze(CLI_QUESTION_QUERY, database_url_from_env())
+    except DatabaseConfigError as error:
         print(error)
         sys.exit(1)

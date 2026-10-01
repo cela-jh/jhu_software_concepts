@@ -10,7 +10,9 @@ import os
 from flask import Blueprint, jsonify, render_template, request
 from sqlalchemy.exc import OperationalError
 
-from database.db_helpers import DatabaseUnavailableError
+from database.db_helpers import (
+    DatabaseConfigError, DatabaseUnavailableError, database_url_from_env,
+)
 from database.load_data import load_data
 from database.models import get_session
 from database.orm_queries import ALL_ORM_ANSWERS
@@ -33,12 +35,17 @@ DATABASE_UNAVAILABLE_MESSAGE = (
 
 def _database_url():
     """
-    Return the DATABASE_URL environment variable, or None if unset.
+    Build the connection URL from the DB_* environment variables, or
+    explain what is missing instead of raising.
 
-    :returns: The connection string, or None if it isn't set.
-    :rtype: str or None
+    :returns: A (connection URL, None) pair, or (None, message) naming
+        the missing or invalid variables.
+    :rtype: tuple(str or None, str or None)
     """
-    return os.getenv("DATABASE_URL") or None
+    try:
+        return database_url_from_env(), None
+    except DatabaseConfigError as error:
+        return None, str(error)
 
 
 @bp.route("/analysis")
@@ -49,18 +56,14 @@ def analysis():
     reload during a pull still shows the Cancel button and its log.
 
     :returns: The rendered analysis page; a plain 500 error message if
-        DATABASE_URL isn't set; or a plain, readable 503 "database
+        a DB_* variable isn't set; or a plain, readable 503 "database
         unavailable" message if PostgreSQL can't actually be reached
         (e.g. it's down), rather than an unhandled 500.
     :rtype: str or tuple(str, int)
     """
-    database_url = _database_url()
-    if database_url is None:
-        return (
-            "Set the DATABASE_URL environment variable before running "
-            "run.py, then restart the server.",
-            500,
-        )
+    database_url, problem = _database_url()
+    if problem:
+        return problem, 500
 
     session = get_session(database_url)
     try:
@@ -93,15 +96,13 @@ def accepted_since():
 
     :returns: JSON ``{ok, school, rows, message}``: 200 with the
         matching result lines (at most the enforced query limit); 400
-        with ``ok`` ``False`` if the school name is invalid; 500 if
-        DATABASE_URL isn't set; 503 if PostgreSQL can't be reached.
+        with ``ok`` ``False`` if the school name is invalid; 500 if a
+        DB_* variable isn't set; 503 if PostgreSQL can't be reached.
     :rtype: tuple(flask.Response, int)
     """
-    database_url = _database_url()
-    if database_url is None:
-        return jsonify(ok=False, message=(
-            "Set the DATABASE_URL environment variable before running run.py."
-        )), 500
+    database_url, problem = _database_url()
+    if problem:
+        return jsonify(ok=False, message=problem), 500
 
     try:
         school = normalize_school(request.args.get("school"))
@@ -123,7 +124,7 @@ def pull_start():
 
     :returns: JSON ``{ok, status, message}``. ``ok``/``status`` are
         ``True``/``"started"`` on success, or ``ok`` ``False`` with
-        status ``"error"`` if CHROME_BINARY or DATABASE_URL aren't set.
+        status ``"error"`` if CHROME_BINARY or a DB_* variable isn't set.
         409 with ``ok`` ``False``, ``busy`` ``True``, and status
         ``"already_running"`` if a pull is already in progress.
     :rtype: flask.Response or tuple(flask.Response, int)
@@ -135,11 +136,9 @@ def pull_start():
             "binary's path before using Pull Data."
         ))
 
-    database_url = _database_url()
-    if database_url is None:
-        return jsonify(ok=False, status="error", message=(
-            "Set the DATABASE_URL environment variable before using Pull Data."
-        ))
+    database_url, problem = _database_url()
+    if problem:
+        return jsonify(ok=False, status="error", message=problem)
 
     started = pull_control.start(chrome_binary, database_url)
     if not started:
@@ -195,8 +194,8 @@ def update_analysis():
 
     :returns: JSON ``{ok, status, message}``. 409 with ``ok`` ``False``,
         ``busy`` ``True``, and status ``"busy"`` if a pull is running;
-        500 with ``ok`` ``False`` and status ``"error"`` if
-        DATABASE_URL isn't set; otherwise 200 with ``ok`` ``True``,
+        500 with ``ok`` ``False`` and status ``"error"`` if a DB_*
+        variable isn't set; otherwise 200 with ``ok`` ``True``,
         status ``"ok"``, and load_data()'s own summary as the message.
     :rtype: flask.Response or tuple(flask.Response, int)
     """
@@ -206,11 +205,9 @@ def update_analysis():
             "pull to finish before updating."
         )), 409
 
-    database_url = _database_url()
-    if database_url is None:
-        return jsonify(ok=False, status="error", message=(
-            "Set the DATABASE_URL environment variable before using Update Analysis."
-        )), 500
+    database_url, problem = _database_url()
+    if problem:
+        return jsonify(ok=False, status="error", message=problem), 500
 
     buffer = io.StringIO()
     with contextlib.redirect_stdout(buffer):

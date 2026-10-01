@@ -129,6 +129,10 @@ Open http://127.0.0.1:5000/analysis. Every answer is read live from PostgreSQL t
 - Update Analysis re-runs the analysis and reloads the page. It never starts a scrape; if a pull is running, it reports that new data is being retrieved and leaves the page as is.
 - Reloading the page while a pull is running shows Cancel and the current status lines immediately.
 
+### A3 school search
+
+The last answer box, A3, lists accepted results from 2024 terms onward at any school whose name contains the text typed into the box on its right (University of Southern California by default), newest first and at most 50 rows. Submit calls `GET /analysis/accepted-since-2024?school=...` and replaces only that list; nothing else on the page is re-queried. A blank box falls back to the default school, and a name over 100 characters or containing control characters is rejected with HTTP 400. This is the one place user input reaches SQL, and it is always a bound parameter (see [section 6](#6-loading-into-postgresql)).
+
 ## 4. Cloudflare Workaround
 
 A plain urllib scrape returns HTTP 403, and a normal Selenium-launched Chrome fares no better, since Selenium's own browser-launch carries automation fingerprints that trigger a repeating "verify you are human" loop. The fix: launch a real Chrome process independently via `subprocess` (not through Selenium) with remote debugging enabled and a persistent profile, then attach Selenium to it over the DevTools Protocol. Since Selenium never launches the browser itself, it never carries the fingerprint that triggers the loop. If Cloudflare's challenge still appears, a human solves it once in the visible window; the script polls the page title until it clears rather than waiting on a keypress, so this works the same whether run directly or as `run.py`'s background Pull Data subprocess, which has no terminal. The cleared session then persists in that Chrome profile for the rest of the run and future runs.
@@ -170,7 +174,8 @@ Every function listed is public (no leading underscore).
 - `parse_args()` - Optional positional filepath (default `paths.DEFAULT_DATA_FILE`). Reads `DATABASE_URL` from the environment when run directly, exiting with a message (and non-zero status) if it's unset or the load itself fails.
 
 ### `database/query_data.py`
-Holds `QUESTION_QUERY`, the list of (question, SQL, format_result) tuples for the Part 2 analysis.
+Holds `QUESTION_QUERY`, the list of (question, `Query`, format_result) tuples for the Part 2 analysis, where each `Query` pairs a composed `sql.SQL` statement with its bound parameters. `CLI_QUESTION_QUERY` adds A3 for the default school.
+- `normalize_school(raw_school)` / `build_accepted_since_query(school)` / `fetch_accepted_since(database_url, school)` - Validate the A3 school input, compose its statement, and run it, returning one formatted line per result.
 - `analyze(question_query, database_url)` - Runs each query and prints its formatted answer; a failing query prints its error in place without stopping the rest.
 - `_database_url()` - Reads `DATABASE_URL` from the environment, raising `EnvironmentError` if it's unset.
 
@@ -239,6 +244,15 @@ A result missing `program`, `date_added`, `url`, `status`, `term`, `us_or_intern
 ### Upserting instead of skipping duplicates
 
 Loading a result whose url already exists updates that row instead of skipping it: every column is set to `COALESCE(new value, existing value)`, so a new non-null value overwrites what's there, but a field the new file lacks leaves the existing value untouched. This means loading `applicant_data.json` then `llm_extend_applicant_data.json` fills in the LLM fields on the same rows, and the reverse order doesn't wipe them back out.
+
+### SQL composition and LIMIT
+
+No SQL in this project is built with f-strings, `+`, or `.format()` on raw SQL text:
+
+- **Composition:** every psycopg statement is built with `psycopg.sql`: the `applicants` table and any dynamic column names go through `sql.Identifier` (quoted by psycopg), and every value, from filter patterns like `'Accepted%'` to the A3 school name, is a placeholder bound at execution (`cursor.execute(statement, params)`). Building a statement (`_limited_query()`, `build_accepted_since_query()`, `_build_upsert()`, `_build_clear_invalid()`) is kept separate from running it.
+- **User input:** the A3 school name is validated (length, printable characters), its LIKE wildcards (`%`, `_`, `\`) are escaped so it only matches literally, and it is only ever sent as a parameter. Injection strings such as `' OR '1'='1` or `'; DROP TABLE applicants; --` therefore match nothing and change nothing, and `%` can't return every row.
+- **LIMIT:** every SELECT (psycopg and SQLAlchemy alike) runs with `LIMIT` bound to `QUERY_LIMIT` (50), fixed in code rather than taken from a request, and passed through `clamp_limit()` so it can never leave the range 1-100. PostgreSQL has no LIMIT clause for INSERT or UPDATE; inserts are instead capped at `BATCH_SIZE` rows per statement, and the two cleanup UPDATEs intentionally cover the whole table.
+- **Bad scraped data:** A1 only counts terms with both a season (Spring, Summer, Fall, or Winter) and a 4-digit year, such as `"Fall 2026"`, in its listed terms and its total alike; malformed terms such as `"Fall"` or `"Autumn 2026"` are excluded. Term years are read with a regex that yields NULL rather than failing a cast, so a malformed term can't crash A3 either.
 
 ### Batching
 

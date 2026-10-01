@@ -36,6 +36,27 @@
             <p class="answer">Answer: {{ answer }}</p>
         </div>
         {% endfor %}
+        <div class="result-row">
+            <div class="result-box" data-testid="accepted-since-box">
+                <p class="question">{{ accepted_question }}</p>
+                <div class="answer">
+                    Answer:
+                    <ul id="accepted-since-list" class="accepted-list" data-testid="accepted-since-list">
+                        {% for line in accepted_rows %}
+                        <li>{{ line }}</li>
+                        {% endfor %}
+                    </ul>
+                </div>
+            </div>
+            <form id="school-form" class="school-form"
+                  data-endpoint="{{ url_for('analysis.accepted_since') }}">
+                <label for="school-input">School name contains</label>
+                <input id="school-input" name="school" type="text" data-testid="school-input"
+                       maxlength="{{ max_school_length }}" value="{{ default_school }}">
+                <button id="school-submit" data-testid="school-submit" type="submit">Submit</button>
+                <p id="school-error" class="school-error" data-testid="school-error"></p>
+            </form>
+        </div>
     </div>
     <script>
         const pullButton = document.getElementById("pull-button");
@@ -128,6 +149,47 @@
                         statusMessage.textContent = data.message;
                         updateButton.disabled = false;
                     }
+                });
+        });
+
+        const schoolForm = document.getElementById("school-form");
+        const schoolInput = document.getElementById("school-input");
+        const schoolSubmit = document.getElementById("school-submit");
+        const schoolError = document.getElementById("school-error");
+        const acceptedList = document.getElementById("accepted-since-list");
+
+        // textContent (never innerHTML) so result text or an echoed
+        // school name can never be interpreted as markup
+        function showAccepted(lines) {
+            acceptedList.innerHTML = "";
+            lines.forEach((line) => {
+                const item = document.createElement("li");
+                item.textContent = line;
+                acceptedList.appendChild(item);
+            });
+        }
+
+        // Re-runs only A3: URLSearchParams encodes the typed text, and
+        // the server binds it as a query parameter.
+        schoolForm.addEventListener("submit", (event) => {
+            event.preventDefault();
+            schoolSubmit.disabled = true;
+            schoolError.textContent = "";
+            const query = new URLSearchParams({ school: schoolInput.value });
+            fetch(`${schoolForm.dataset.endpoint}?${query}`)
+                .then((response) => response.json())
+                .then((data) => {
+                    if (data.ok) {
+                        showAccepted(data.rows.length > 0 ? data.rows : [data.message]);
+                    } else {
+                        schoolError.textContent = data.message;
+                    }
+                })
+                .catch(() => {
+                    schoolError.textContent = "Could not reach the server. Please try again.";
+                })
+                .finally(() => {
+                    schoolSubmit.disabled = false;
                 });
         });
 

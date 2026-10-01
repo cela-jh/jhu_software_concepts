@@ -6,6 +6,7 @@ _database_url() readers, and the functions that print every answer
 (run_orm_queries(), analyze()) against the real cam_db_test database.
 """
 import pytest
+from psycopg import sql
 
 import database.orm_queries as orm_queries
 import database.query_data as query_data
@@ -85,7 +86,10 @@ def test_analyze_prints_error_for_failing_query(db_connection, database_url, cap
     """A query against a table that doesn't exist should have its error
     printed in place, without stopping the rest of the run - here there's
     only one question, so it should just print the error and finish."""
-    bad_question = [("A question about a missing table", "SELECT * FROM nonexistent_table_xyz", str)]
+    bad_query = query_data.Query(
+        sql.SQL("SELECT * FROM {table}").format(table=sql.Identifier("nonexistent_table_xyz")), {}
+    )
+    bad_question = [("A question about a missing table", bad_query, str)]
 
     query_data.analyze(bad_question, database_url)
 

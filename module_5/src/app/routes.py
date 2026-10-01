@@ -7,18 +7,28 @@ import contextlib
 import io
 import os
 
-from flask import Blueprint, jsonify, render_template
+from flask import Blueprint, jsonify, render_template, request
 from sqlalchemy.exc import OperationalError
 
+from database.db_helpers import DatabaseUnavailableError
 from database.load_data import load_data
 from database.models import get_session
 from database.orm_queries import ALL_ORM_ANSWERS
-from database.query_data import QUESTION_QUERY
+from database.query_data import (
+    ACCEPTED_SINCE_QUESTION, ACCEPTED_SINCE_YEAR, DEFAULT_SCHOOL, MAX_SCHOOL_LENGTH,
+    NO_ACCEPTED_RESULTS, QUESTION_QUERY, InvalidSchoolInput, fetch_accepted_since,
+    normalize_school,
+)
 from paths import DEFAULT_DATA_FILE
 
 from . import pull_control
 
 bp = Blueprint("analysis", __name__)
+
+DATABASE_UNAVAILABLE_MESSAGE = (
+    "The database is currently unavailable. Please check that "
+    "PostgreSQL is running and reachable, then try again."
+)
 
 
 def _database_url():
@@ -56,21 +66,53 @@ def analysis():
     try:
         questions = [question for question, _, _ in QUESTION_QUERY]
         answers = [answer_fn(session) for answer_fn in ALL_ORM_ANSWERS]
-    except OperationalError:
-        return (
-            "The database is currently unavailable. Please check that "
-            "PostgreSQL is running and reachable, then try again.",
-            503,
-        )
+        accepted_rows = fetch_accepted_since(database_url, DEFAULT_SCHOOL)
+    except (OperationalError, DatabaseUnavailableError):
+        return DATABASE_UNAVAILABLE_MESSAGE, 503
     finally:
         session.close()
 
     return render_template(
         "analysis.html",
         results=list(zip(questions, answers)),
+        accepted_question=ACCEPTED_SINCE_QUESTION,
+        accepted_rows=accepted_rows or [NO_ACCEPTED_RESULTS],
+        default_school=DEFAULT_SCHOOL,
+        max_school_length=MAX_SCHOOL_LENGTH,
         pull_running=pull_control.is_running(),
         pull_lines=pull_control.recent_lines(),
     )
+
+
+@bp.route(f"/analysis/accepted-since-{ACCEPTED_SINCE_YEAR}")
+def accepted_since():
+    """
+    Re-run only the A3 query for the school typed into its text box. The
+    `school` query argument is validated by normalize_school() and then
+    only ever reaches PostgreSQL as a bound parameter.
+
+    :returns: JSON ``{ok, school, rows, message}``: 200 with the
+        matching result lines (at most the enforced query limit); 400
+        with ``ok`` ``False`` if the school name is invalid; 500 if
+        DATABASE_URL isn't set; 503 if PostgreSQL can't be reached.
+    :rtype: tuple(flask.Response, int)
+    """
+    database_url = _database_url()
+    if database_url is None:
+        return jsonify(ok=False, message=(
+            "Set the DATABASE_URL environment variable before running run.py."
+        )), 500
+
+    try:
+        school = normalize_school(request.args.get("school"))
+        rows = fetch_accepted_since(database_url, school)
+    except InvalidSchoolInput as error:
+        return jsonify(ok=False, message=str(error)), 400
+    except DatabaseUnavailableError:
+        return jsonify(ok=False, message=DATABASE_UNAVAILABLE_MESSAGE), 503
+
+    message = f"{len(rows)} results." if rows else NO_ACCEPTED_RESULTS
+    return jsonify(ok=True, school=school, rows=rows, message=message), 200
 
 
 @bp.route("/pull-data", methods=["POST"])

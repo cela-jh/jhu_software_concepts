@@ -157,11 +157,13 @@ def test_orm_a1_percentages_use_two_decimals():
     """orm_a1 formats one percentage per term found in the data; every
     one of them must carry exactly two decimals, not just whichever one
     happens to need rounding."""
+    # rows arrive already in chronological order, as the ORDER BY in
+    # orm_a1's own query returns them from PostgreSQL
     session = _FakeSession([
         _FakeResult(scalar=10),
         _FakeResult(rows=[
-            SimpleNamespace(term="Fall 2026", cnt=3),
             SimpleNamespace(term="Spring 2026", cnt=7),
+            SimpleNamespace(term="Fall 2026", cnt=3),
         ]),
     ])
 
@@ -189,14 +191,16 @@ def test_analysis_page_labels_every_result_answer(client, monkeypatch):
     monkeypatch.setattr("app.routes.get_session", lambda database_url: _FakeSession([]))
     monkeypatch.setattr("app.routes.QUESTION_QUERY", fake_questions)
     monkeypatch.setattr("app.routes.ALL_ORM_ANSWERS", fake_answers)
+    monkeypatch.setattr("app.routes.fetch_accepted_since", lambda url, school: ["A3 row"])
 
     response = client.get("/analysis")
 
     soup = BeautifulSoup(response.get_data(as_text=True), "html.parser")
     answer_elements = soup.select(".answer")
-    assert len(answer_elements) == len(fake_questions)
+    # one per Part 2 question, plus A3's own answer box
+    assert len(answer_elements) == len(fake_questions) + 1
     for element in answer_elements:
-        assert element.get_text().startswith("Answer:")
+        assert element.get_text(strip=True).startswith("Answer:")
 
 
 @pytest.mark.analysis
@@ -209,6 +213,7 @@ def test_analysis_page_percentages_use_two_decimals(client, monkeypatch):
     monkeypatch.setattr("app.routes.get_session", lambda database_url: _FakeSession([]))
     monkeypatch.setattr("app.routes.QUESTION_QUERY", fake_questions)
     monkeypatch.setattr("app.routes.ALL_ORM_ANSWERS", fake_answers)
+    monkeypatch.setattr("app.routes.fetch_accepted_since", lambda url, school: [])
 
     response = client.get("/analysis")
 

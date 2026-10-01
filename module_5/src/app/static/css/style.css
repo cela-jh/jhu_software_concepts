@@ -40,7 +40,8 @@ h1 {
     gap: 12px;
 }
 
-.buttons button {
+.buttons button,
+.school-form button {
     font-family: Helvetica, sans-serif;
     font-size: 14px;
     font-weight: bold;
@@ -52,7 +53,8 @@ h1 {
     cursor: pointer;
 }
 
-.buttons button:disabled {
+.buttons button:disabled,
+.school-form button:disabled {
     cursor: default;
     opacity: 0.6;
 }
@@ -85,7 +87,6 @@ h1 {
     display: flex;
     flex-direction: column;
     gap: 16px;
-    max-width: 800px;
 }
 
 /* USC gold, matching module_1's hover/accent color */
@@ -93,6 +94,8 @@ h1 {
     background-color: #FFCC00;
     border-radius: 8px;
     padding: 16px 20px;
+    max-width: 800px;
+    box-sizing: border-box;
 }
 
 .question {
@@ -102,5 +105,51 @@ h1 {
 
 .answer {
     font-style: italic;
+    margin: 0;
+}
+
+/* A3: its answer box with the school search form to the right,
+   stacking the form below when the page is too narrow for both */
+.result-row {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 16px;
+    align-items: flex-start;
+}
+
+.result-row .result-box {
+    flex: 0 1 800px;
+    min-width: 0;
+}
+
+.accepted-list {
+    margin: 8px 0 0 0;
+    padding-left: 20px;
+    max-height: 320px;
+    overflow-y: auto;
+}
+
+.school-form {
+    flex: 0 0 220px;
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+}
+
+.school-form label {
+    font-weight: bold;
+}
+
+.school-form input {
+    font-family: Helvetica, sans-serif;
+    font-size: 14px;
+    padding: 8px;
+    border: 1px solid #000000;
+    border-radius: 6px;
+}
+
+.school-error {
+    font-weight: bold;
+    min-height: 1.2em;
     margin: 0;
 }

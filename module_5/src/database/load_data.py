@@ -12,8 +12,9 @@ import sys
 from datetime import datetime
 from pathlib import Path
 import psycopg
+from psycopg import sql
 
-from database.db_helpers import connect_db, disconnect_db
+from database.db_helpers import APPLICANTS, connect_db, disconnect_db
 from paths import DEFAULT_DATA_FILE
 from scraping.storage import validate_filepath
 
@@ -42,7 +43,16 @@ GRE_VALID_RANGES = [(130, 170)]
 GRE_V_VALID_RANGE = (130, 170)
 GRE_AW_VALID_RANGE = (0, 6)
 
+# Every score column and the (low, high) ranges its values must fall in.
+SCORE_VALID_RANGES = {
+    "gpa": [GPA_VALID_RANGE],
+    "gre": GRE_VALID_RANGES,
+    "gre_v": [GRE_V_VALID_RANGE],
+    "gre_aw": [GRE_AW_VALID_RANGE],
+}
+
 NATIONALITY_VALUES = {"american": "American", "international": "International"}
+OTHER_NATIONALITY = "Other"
 
 
 class InvalidResult(Exception):
@@ -86,7 +96,7 @@ def _normalize_nationality(value):
     :returns: 'American', 'International', or 'Other'.
     :rtype: str
     """
-    return NATIONALITY_VALUES.get(value.strip().lower(), "Other")
+    return NATIONALITY_VALUES.get(value.strip().lower(), OTHER_NATIONALITY)
 
 
 def _parse_date_added(text):
@@ -181,6 +191,43 @@ def _chunked(items, size):
 UPDATE_COLUMNS = [column for column in COLUMNS if column not in ("p_id", "url")]
 
 
+def _build_upsert(row_count):
+    """
+    Compose the multi-row upsert for row_count rows. Table and column
+    names are quoted with sql.Identifier and every value is a
+    placeholder, so no data is ever written into the statement text.
+    INSERT has no LIMIT clause in PostgreSQL; BATCH_SIZE caps how many
+    rows one statement can carry instead.
+
+    :param row_count: How many rows the statement inserts.
+    :type row_count: int
+    :returns: The composed INSERT ... ON CONFLICT statement.
+    :rtype: psycopg.sql.Composed
+    """
+    column_list = sql.SQL(", ").join(sql.Identifier(column) for column in COLUMNS)
+    row_placeholders = sql.SQL("({})").format(
+        sql.SQL(", ").join(sql.Placeholder() for _ in COLUMNS)
+    )
+    # keep the existing value for any column the new data leaves NULL
+    set_clause = sql.SQL(", ").join(
+        sql.SQL("{column} = COALESCE(EXCLUDED.{column}, {table}.{column})").format(
+            column=sql.Identifier(column), table=APPLICANTS,
+        )
+        for column in UPDATE_COLUMNS
+    )
+    return sql.SQL(
+        "INSERT INTO {table} ({columns}) VALUES {values} "
+        "ON CONFLICT ({url}) DO UPDATE SET {set_clause} "
+        "RETURNING {url}, (xmax = 0) AS inserted"
+    ).format(
+        table=APPLICANTS,
+        columns=column_list,
+        values=sql.SQL(", ").join([row_placeholders] * row_count),
+        url=sql.Identifier("url"),
+        set_clause=set_clause,
+    )
+
+
 def _insert_batch(cursor, batch):
     """
     Insert or upsert a batch of rows into the applicants table in a
@@ -197,21 +244,10 @@ def _insert_batch(cursor, batch):
     :returns: A tuple of (set of newly inserted urls, set of updated urls).
     :rtype: tuple(set, set)
     """
-    placeholder_group = "(" + ", ".join(["%s"] * len(COLUMNS)) + ")"
-    values_clause = ", ".join([placeholder_group] * len(batch))
-    set_clause = ", ".join(
-        f"{column} = COALESCE(EXCLUDED.{column}, applicants.{column})"
-        for column in UPDATE_COLUMNS
-    )
-    sql = (
-        f"INSERT INTO applicants ({', '.join(COLUMNS)}) "
-        f"VALUES {values_clause} "
-        f"ON CONFLICT (url) DO UPDATE SET {set_clause} "
-        f"RETURNING url, (xmax = 0) AS inserted;"
-    )
+    stmt = _build_upsert(len(batch))
     params = [row[column] for row in batch for column in COLUMNS]
 
-    cursor.execute(sql, params)
+    cursor.execute(stmt, params)
     inserted_urls = set()
     updated_urls = set()
     for url, was_inserted in cursor.fetchall():
@@ -275,37 +311,41 @@ def _clear_invalid_scores(cursor):
     :returns: None.
     :rtype: None
     """
-    cursor.execute(
-        "UPDATE applicants SET gpa = NULL "
-        "WHERE gpa IS NOT NULL AND NOT (gpa BETWEEN %s AND %s);",
-        GPA_VALID_RANGE,
-    )
-    cleared_gpa = cursor.rowcount
-    gre_range_clause = " OR ".join(["gre BETWEEN %s AND %s"] * len(GRE_VALID_RANGES))
-    cursor.execute(
-        f"UPDATE applicants SET gre = NULL "
-        f"WHERE gre IS NOT NULL AND NOT ({gre_range_clause});",
-        [value for bounds in GRE_VALID_RANGES for value in bounds],
-    )
-    cleared_gre = cursor.rowcount
-    cursor.execute(
-        "UPDATE applicants SET gre_v = NULL "
-        "WHERE gre_v IS NOT NULL AND NOT (gre_v BETWEEN %s AND %s);",
-        GRE_V_VALID_RANGE,
-    )
-    cleared_gre_v = cursor.rowcount
-    cursor.execute(
-        "UPDATE applicants SET gre_aw = NULL "
-        "WHERE gre_aw IS NOT NULL AND NOT (gre_aw BETWEEN %s AND %s);",
-        GRE_AW_VALID_RANGE,
-    )
-    cleared_gre_aw = cursor.rowcount
+    cleared = {}
+    for column, valid_ranges in SCORE_VALID_RANGES.items():
+        stmt = _build_clear_invalid(column, len(valid_ranges))
+        cursor.execute(stmt, [value for bounds in valid_ranges for value in bounds])
+        cleared[column] = cursor.rowcount
 
-    total = cleared_gpa + cleared_gre + cleared_gre_v + cleared_gre_aw
+    total = sum(cleared.values())
     if total:
-        print(f"Cleared {total} implausible score values already in the table "
-              f"(gpa: {cleared_gpa}, gre: {cleared_gre}, gre_v: {cleared_gre_v}, "
-              f"gre_aw: {cleared_gre_aw}).")
+        counts = ", ".join(f"{column}: {count}" for column, count in cleared.items())
+        print(f"Cleared {total} implausible score values already in the table ({counts}).")
+
+
+def _build_clear_invalid(column, range_count):
+    """
+    Compose the UPDATE that nulls one score column's values outside all
+    of its valid ranges. The column is quoted with sql.Identifier and
+    each range bound is a placeholder. UPDATE has no LIMIT clause in
+    PostgreSQL; this cleanup intentionally covers the whole table.
+
+    :param column: The score column to clean.
+    :type column: str
+    :param range_count: How many (low, high) ranges the column accepts.
+    :type range_count: int
+    :returns: The composed UPDATE statement.
+    :rtype: psycopg.sql.Composed
+    """
+    column_id = sql.Identifier(column)
+    in_any_range = sql.SQL(" OR ").join(
+        sql.SQL("{column} BETWEEN %s AND %s").format(column=column_id)
+        for _ in range(range_count)
+    )
+    return sql.SQL(
+        "UPDATE {table} SET {column} = NULL "
+        "WHERE {column} IS NOT NULL AND NOT ({in_any_range})"
+    ).format(table=APPLICANTS, column=column_id, in_any_range=in_any_range)
 
 
 def _normalize_existing_nationality(cursor):
@@ -321,10 +361,10 @@ def _normalize_existing_nationality(cursor):
     :returns: None.
     :rtype: None
     """
-    cursor.execute(
-        "UPDATE applicants SET us_or_international = 'Other' "
-        "WHERE us_or_international NOT IN ('American', 'International');"
-    )
+    stmt = sql.SQL(
+        "UPDATE {table} SET {column} = %s WHERE {column} <> ALL(%s)"
+    ).format(table=APPLICANTS, column=sql.Identifier("us_or_international"))
+    cursor.execute(stmt, (OTHER_NATIONALITY, list(NATIONALITY_VALUES.values())))
     changed = cursor.rowcount
     if changed:
         print(f"Set us_or_international to 'Other' for {changed} rows "

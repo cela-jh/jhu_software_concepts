@@ -41,12 +41,14 @@ def test_app_factory_creates_required_routes(app):
     assert "/pull/cancel" in rule_paths
     assert "/pull/status" in rule_paths
     assert "/update-analysis" in rule_paths
+    assert "/analysis/accepted-since-2024" in rule_paths
 
     assert "GET" in _rule_methods(app, "/analysis")
     assert "GET" in _rule_methods(app, "/pull/status")
     assert "POST" in _rule_methods(app, "/pull-data")
     assert "POST" in _rule_methods(app, "/pull/cancel")
     assert "POST" in _rule_methods(app, "/update-analysis")
+    assert "GET" in _rule_methods(app, "/analysis/accepted-since-2024")
 
 
 @pytest.mark.web
@@ -56,6 +58,7 @@ def test_analysis(client, monkeypatch):
     monkeypatch.setattr("app.routes.get_session", lambda database_url: _FakeSession())
     monkeypatch.setattr("app.routes.ALL_ORM_ANSWERS", FAKE_ANSWERS)
     monkeypatch.setattr("app.routes.QUESTION_QUERY", FAKE_QUESTION_QUERY)
+    monkeypatch.setattr("app.routes.fetch_accepted_since", lambda url, school: ["A3 row"])
 
     response = client.get("/analysis")
 

@@ -9,6 +9,8 @@ from sqlalchemy import Date, Float, Text, create_engine
 from sqlalchemy.engine import make_url
 from sqlalchemy.orm import DeclarativeBase, Mapped, Session, mapped_column
 
+from database.db_helpers import APPLICANTS_TABLE_NAME
+
 
 # ORM model classes declare mapped columns rather than methods, so the
 # public method count check does not apply to them.
@@ -19,7 +21,7 @@ class Base(DeclarativeBase):  # pylint: disable=too-few-public-methods
 class Applicant(Base):  # pylint: disable=too-few-public-methods
     """ORM model for a single row of the `applicants` table."""
 
-    __tablename__ = "applicants"
+    __tablename__ = APPLICANTS_TABLE_NAME
 
     p_id: Mapped[int] = mapped_column(primary_key=True)
     program: Mapped[str] = mapped_column(Text)

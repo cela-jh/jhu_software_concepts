@@ -11,17 +11,54 @@ answer.
 import os
 import sys
 
-from sqlalchemy import Numeric, and_, case, cast, func, or_, select
+from sqlalchemy import Integer, Numeric, and_, case, cast, func, or_, select
 
+from database.db_helpers import LIKE_ESCAPE, escape_like, query_limit
 from database.models import Applicant, get_session
+from database.query_data import (
+    ACCEPTED_PATTERN, ACCEPTED_SINCE_YEAR, LISTED_UNIVERSITIES,
+    SCHOOL_PREFIX_PATTERN, SPRING_PATTERN, TERM_YEAR_PATTERN, USC_NAMES,
+    VALID_TERM_PATTERN, format_accepted_row,
+)
 
-UNIVERSITIES = [
-    "Georgetown University",
-    "Massachusetts Institute of Technology",
-    "MIT",
-    "Stanford University",
-    "Carnegie Mellon University",
-]
+
+def _limited(statement):
+    """
+    Apply the enforced row limit to a SELECT. SQLAlchemy sends the
+    limit value as a bound parameter.
+
+    :param statement: The SELECT to limit.
+    :type statement: sqlalchemy.sql.Select
+    :returns: The same SELECT with LIMIT query_limit().
+    :rtype: sqlalchemy.sql.Select
+    """
+    return statement.limit(query_limit())
+
+
+def _scalar(session, statement):
+    """
+    Run a single-value SELECT with the enforced row limit applied.
+
+    :param session: Active SQLAlchemy session.
+    :type session: sqlalchemy.orm.Session
+    :param statement: A SELECT returning exactly one row and column.
+    :type statement: sqlalchemy.sql.Select
+    :returns: The single value.
+    :rtype: object
+    """
+    return session.execute(_limited(statement)).scalar_one()
+
+
+def _term_year():
+    """
+    The four-digit year at the end of a term such as "Fall 2025", as an
+    integer, or NULL for a term without one, so malformed scraped terms
+    never raise a cast error.
+
+    :returns: The year expression.
+    :rtype: sqlalchemy.sql.expression.ColumnElement
+    """
+    return cast(func.substring(Applicant.term, TERM_YEAR_PATTERN), Integer)
 
 
 def _round2(expr):
@@ -77,11 +114,9 @@ def orm_q1(session):
     :returns: The formatted answer.
     :rtype: str
     """
-    count = session.execute(
-        select(func.count())
-        .select_from(Applicant)
-        .where(Applicant.term.ilike("Fall 2026"))
-    ).scalar_one()
+    count = _scalar(session, select(func.count())
+                    .select_from(Applicant)
+                    .where(Applicant.term.ilike("Fall 2026")))
     return f"Applicant count: {count}"
 
 
@@ -100,11 +135,24 @@ def orm_q2(session):
         Applicant.us_or_international != "",
     )
     international = case((Applicant.us_or_international.ilike("International"), 1), else_=0)
-    pct = session.execute(
-        select(_round2(func.sum(international) * 100.0 / func.count()))
-        .where(usable)
-    ).scalar_one()
+    pct = _scalar(session, select(_round2(func.sum(international) * 100.0 / func.count()))
+                  .where(usable))
     return f"International percentage: {_format_percentage(pct)}"
+
+
+def _average(session, column):
+    """
+    Average of a score column over rows that have a value, rounded to 2
+    decimal places.
+
+    :param session: Active SQLAlchemy session.
+    :type session: sqlalchemy.orm.Session
+    :param column: The mapped score column.
+    :type column: sqlalchemy.orm.InstrumentedAttribute
+    :returns: The rounded average, or None if no row has a value.
+    :rtype: decimal.Decimal or None
+    """
+    return _scalar(session, select(_round2(func.avg(column))).where(column.is_not(None)))
 
 
 def orm_q3(session):
@@ -117,18 +165,10 @@ def orm_q3(session):
     :returns: The formatted answer.
     :rtype: str
     """
-    avg_gpa = session.execute(
-        select(_round2(func.avg(Applicant.gpa))).where(Applicant.gpa.is_not(None))
-    ).scalar_one()
-    avg_gre = session.execute(
-        select(_round2(func.avg(Applicant.gre))).where(Applicant.gre.is_not(None))
-    ).scalar_one()
-    avg_gre_v = session.execute(
-        select(_round2(func.avg(Applicant.gre_v))).where(Applicant.gre_v.is_not(None))
-    ).scalar_one()
-    avg_gre_aw = session.execute(
-        select(_round2(func.avg(Applicant.gre_aw))).where(Applicant.gre_aw.is_not(None))
-    ).scalar_one()
+    avg_gpa = _average(session, Applicant.gpa)
+    avg_gre = _average(session, Applicant.gre)
+    avg_gre_v = _average(session, Applicant.gre_v)
+    avg_gre_aw = _average(session, Applicant.gre_aw)
     return (f"Average GPA: {_or_na(avg_gpa)}, Average GRE: {_or_na(avg_gre)}, "
             f"Average GRE V: {_or_na(avg_gre_v)}, Average GRE AW: {_or_na(avg_gre_aw)}")
 
@@ -142,16 +182,13 @@ def orm_q4(session):
     :returns: The formatted answer.
     :rtype: str
     """
-    avg_gpa = session.execute(
-        select(_round2(func.avg(Applicant.gpa)))
-        .where(
-            and_(
-                Applicant.gpa.is_not(None),
-                Applicant.us_or_international.ilike("American"),
-                Applicant.term.ilike("Fall 2026"),
-            )
+    avg_gpa = _scalar(session, select(_round2(func.avg(Applicant.gpa))).where(
+        and_(
+            Applicant.gpa.is_not(None),
+            Applicant.us_or_international.ilike("American"),
+            Applicant.term.ilike("Fall 2026"),
         )
-    ).scalar_one()
+    ))
     return f"Average GPA American: {_or_na(avg_gpa)}"
 
 
@@ -164,14 +201,12 @@ def orm_q5(session):
     :returns: The formatted answer.
     :rtype: str
     """
-    accepted = case((Applicant.status.ilike("Accepted%"), 1), else_=0)
-    pct = session.execute(
-        # The denominator counts every Fall 2025 row via count(), not
-        # count(status), so a NULL-status row is still counted (it just
-        # never contributes to the numerator via the CASE above).
-        select(_round2(func.sum(accepted) * 100.0 / func.count()))
-        .where(Applicant.term.ilike("Fall 2025"))
-    ).scalar_one()
+    accepted = case((Applicant.status.ilike(ACCEPTED_PATTERN), 1), else_=0)
+    # The denominator counts every Fall 2025 row via count(), not
+    # count(status), so a NULL-status row is still counted (it just
+    # never contributes to the numerator via the CASE above).
+    pct = _scalar(session, select(_round2(func.sum(accepted) * 100.0 / func.count()))
+                  .where(Applicant.term.ilike("Fall 2025")))
     return f"Percentage accepted: {_format_percentage(pct)}"
 
 
@@ -184,16 +219,13 @@ def orm_q6(session):
     :returns: The formatted answer.
     :rtype: str
     """
-    avg_gpa = session.execute(
-        select(_round2(func.avg(Applicant.gpa)))
-        .where(
-            and_(
-                Applicant.term.ilike("Fall 2026"),
-                Applicant.gpa.is_not(None),
-                Applicant.status.ilike("Accepted%"),
-            )
+    avg_gpa = _scalar(session, select(_round2(func.avg(Applicant.gpa))).where(
+        and_(
+            Applicant.term.ilike("Fall 2026"),
+            Applicant.gpa.is_not(None),
+            Applicant.status.ilike(ACCEPTED_PATTERN),
         )
-    ).scalar_one()
+    ))
     return f"Average GPA accepted: {_or_na(avg_gpa)}"
 
 
@@ -206,20 +238,16 @@ def orm_q7(session):
     :returns: The formatted answer.
     :rtype: str
     """
-    count = session.execute(
-        select(func.count())
-        .select_from(Applicant)
-        .where(
-            and_(
-                Applicant.degree.ilike("Masters"),
-                Applicant.program.ilike("Computer Science, %"),
-                or_(
-                    Applicant.program.ilike("%, Johns Hopkins University%"),
-                    Applicant.program.ilike("%, JHU%"),
-                ),
-            )
+    count = _scalar(session, select(func.count()).select_from(Applicant).where(
+        and_(
+            Applicant.degree.ilike("Masters"),
+            Applicant.program.ilike("Computer Science, %"),
+            or_(
+                Applicant.program.ilike("%, Johns Hopkins University%"),
+                Applicant.program.ilike("%, JHU%"),
+            ),
         )
-    ).scalar_one()
+    ))
     return f"JHU Masters Computer Science count: {count}"
 
 
@@ -233,20 +261,16 @@ def _q8_count(session):
     :returns: The matching row count.
     :rtype: int
     """
-    university_match = or_(*(Applicant.program.ilike(f"%, {u}") for u in UNIVERSITIES))
-    return session.execute(
-        select(func.count())
-        .select_from(Applicant)
-        .where(
-            and_(
-                Applicant.term.ilike("Fall 2026"),
-                Applicant.degree.ilike("PhD"),
-                Applicant.status.ilike("Accepted%"),
-                Applicant.program.ilike("Computer Science, %"),
-                university_match,
-            )
+    university_match = or_(*(Applicant.program.ilike(f"%, {u}") for u in LISTED_UNIVERSITIES))
+    return _scalar(session, select(func.count()).select_from(Applicant).where(
+        and_(
+            Applicant.term.ilike("Fall 2026"),
+            Applicant.degree.ilike("PhD"),
+            Applicant.status.ilike(ACCEPTED_PATTERN),
+            Applicant.program.ilike("Computer Science, %"),
+            university_match,
         )
-    ).scalar_one()
+    ))
 
 
 def orm_q8(session):
@@ -273,20 +297,18 @@ def orm_q9(session):
     :rtype: str
     """
     original_count = _q8_count(session)
-    university_match = or_(*(Applicant.llm_generated_university.ilike(u) for u in UNIVERSITIES))
-    llm_count = session.execute(
-        select(func.count())
-        .select_from(Applicant)
-        .where(
-            and_(
-                Applicant.term.ilike("Fall 2026"),
-                Applicant.degree.ilike("PhD"),
-                Applicant.status.ilike("Accepted%"),
-                Applicant.llm_generated_program.ilike("Computer Science"),
-                university_match,
-            )
+    university_match = or_(
+        *(Applicant.llm_generated_university.ilike(u) for u in LISTED_UNIVERSITIES)
+    )
+    llm_count = _scalar(session, select(func.count()).select_from(Applicant).where(
+        and_(
+            Applicant.term.ilike("Fall 2026"),
+            Applicant.degree.ilike("PhD"),
+            Applicant.status.ilike(ACCEPTED_PATTERN),
+            Applicant.llm_generated_program.ilike("Computer Science"),
+            university_match,
         )
-    ).scalar_one()
+    ))
     difference = llm_count - original_count
     return (f"PhD Computer Science at listed schools: {original_count}, "
             f"PhD Computer Science at listed schools (LLM): {llm_count}, "
@@ -296,31 +318,36 @@ def orm_q9(session):
 def orm_a1(session):
     """
     What percentage of total acceptances come from each term found in
-    the data?
+    the data? Only terms with both a season and a year count, in the
+    list and in the total alike.
 
     :param session: Active SQLAlchemy session.
     :type session: sqlalchemy.orm.Session
     :returns: The formatted answer.
     :rtype: str
     """
-    accepted_filter = Applicant.status.ilike("Accepted%")
-    total_accepted = session.execute(
-        select(func.count()).select_from(Applicant).where(accepted_filter)
-    ).scalar_one()
+    accepted_filter = and_(
+        Applicant.status.ilike(ACCEPTED_PATTERN),
+        Applicant.term.regexp_match(VALID_TERM_PATTERN, flags="i"),
+    )
+    total_accepted = _scalar(
+        session, select(func.count()).select_from(Applicant).where(accepted_filter)
+    )
 
-    rows = session.execute(
+    # chronological: by year, then Spring before Fall within a year
+    rows = session.execute(_limited(
         select(Applicant.term, func.count().label("cnt"))
         .where(accepted_filter)
         .group_by(Applicant.term)
-    ).all()
+        .order_by(
+            _term_year().asc(),
+            case((Applicant.term.ilike(SPRING_PATTERN), 0), else_=1),
+        )
+    )).all()
 
-    ordered = sorted(
-        rows,
-        key=lambda row: (int(row.term.split()[1]), 0 if row.term.startswith("Spring") else 1)
-    )
     parts = [
         f"{row.term} acceptance: {_format_percentage(row.cnt * 100.0 / total_accepted)}"
-        for row in ordered
+        for row in rows
     ]
     return ", ".join(parts) if parts else "No accepted applicants found"
 
@@ -335,18 +362,16 @@ def orm_a2(session):
     :returns: The formatted answer.
     :rtype: str
     """
-    usc_match = or_(
-        Applicant.program.ilike("%, University of Southern California"),
-        Applicant.program.ilike("%, USC"),
+    usc_with_gpa = and_(
+        Applicant.gpa.is_not(None),
+        or_(*(Applicant.program.ilike(f"%, {name}") for name in USC_NAMES)),
     )
-    accepted_avg = session.execute(
-        select(_round2(func.avg(Applicant.gpa)))
-        .where(and_(Applicant.gpa.is_not(None), usc_match, Applicant.status.ilike("Accepted%")))
-    ).scalar_one()
-    not_accepted_avg = session.execute(
-        select(_round2(func.avg(Applicant.gpa)))
-        .where(and_(Applicant.gpa.is_not(None), usc_match, Applicant.status.not_ilike("Accepted%")))
-    ).scalar_one()
+    accepted_avg = _scalar(session, select(_round2(func.avg(Applicant.gpa))).where(
+        and_(usc_with_gpa, Applicant.status.ilike(ACCEPTED_PATTERN))
+    ))
+    not_accepted_avg = _scalar(session, select(_round2(func.avg(Applicant.gpa))).where(
+        and_(usc_with_gpa, Applicant.status.not_ilike(ACCEPTED_PATTERN))
+    ))
     difference = (
         accepted_avg - not_accepted_avg
         if accepted_avg is not None and not_accepted_avg is not None
@@ -355,6 +380,39 @@ def orm_a2(session):
     return (f"USC average GPA accepted: {_or_na(accepted_avg)}, "
             f"USC average GPA not accepted: {_or_na(not_accepted_avg)}, "
             f"Difference: {_or_na(difference)}")
+
+
+def orm_a3(session, school):
+    """
+    ORM version of query_data's A3: accepted results from
+    ACCEPTED_SINCE_YEAR terms onward at a school whose name contains
+    school. SQLAlchemy binds every value, and LIKE wildcards in school
+    are escaped so it only ever matches literally.
+
+    :param session: Active SQLAlchemy session.
+    :type session: sqlalchemy.orm.Session
+    :param school: A school name already cleaned by
+        query_data.normalize_school().
+    :type school: str
+    :returns: One formatted line per matching result, at most
+        query_limit() lines.
+    :rtype: list[str]
+    """
+    school_part = func.regexp_replace(Applicant.program, SCHOOL_PREFIX_PATTERN, "")
+    term_year = _term_year()
+    rows = session.execute(_limited(
+        select(Applicant.program, Applicant.degree, Applicant.term,
+               Applicant.status, Applicant.gpa)
+        .where(
+            and_(
+                Applicant.status.ilike(ACCEPTED_PATTERN),
+                term_year >= ACCEPTED_SINCE_YEAR,
+                school_part.ilike(f"%{escape_like(school)}%", escape=LIKE_ESCAPE),
+            )
+        )
+        .order_by(Applicant.date_added.desc(), Applicant.p_id.desc())
+    )).mappings().all()
+    return [format_accepted_row(row) for row in rows]
 
 
 ORM_QUESTIONS = [orm_q1, orm_q4, orm_q5, orm_q8, orm_q9, orm_a1]

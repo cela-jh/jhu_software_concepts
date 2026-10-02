@@ -31,18 +31,29 @@ Requirements
 Setup
 -----
 
-1. From ``module_4``, create and activate a virtual environment:
+1. From ``module_5``, create a virtual environment and install the pinned
+   dependencies plus the project itself (editable, from ``setup.py``),
+   with either pip or uv:
 
    .. code-block:: console
 
+      # pip + venv
       python3 -m venv venv
       source venv/bin/activate        # Windows: venv\\Scripts\\activate
-
-2. Install dependencies:
-
-   .. code-block:: console
-
       pip install -r requirements.txt
+      pip install -e .
+
+      # or uv
+      uv venv venv
+      source venv/bin/activate
+      uv pip sync requirements.txt
+      uv pip install -e .
+
+2. ``requirements.txt`` pins every package, including indirect ones, and
+   is generated from the hand-edited ``requirements.in`` with
+   ``uv pip compile requirements.in --universal --python-version 3.12 -o requirements.txt``.
+   ``uv pip sync`` makes the environment match it exactly, so run it
+   before ``uv pip install -e .``.
 
 3. Locate your Chrome binary's absolute path (needed for ``--chrome_binary``):
 
@@ -103,12 +114,12 @@ their package imports resolve from ``src/``.
 Running the tests
 ------------------
 
-**Always run from the repository root** (the parent of ``module_4/``),
-with the ``module_4/tests`` path included:
+**Always run from the repository root** (the parent of ``module_5/``),
+with the ``module_5/tests`` path included:
 
 .. code-block:: console
 
-   pytest module_4/tests -m "web or buttons or analysis or db or integration"
+   pytest module_5/tests -m "web or buttons or analysis or db or integration"
 
 See :doc:`testing_guide` for why that path argument is required, how
 markers work, and what fixtures and test doubles are available.

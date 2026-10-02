@@ -4,9 +4,9 @@ Testing Guide
 Setup
 -----
 
-1. Create and activate ``module_4/venv``, then ``pip install -r requirements.txt``
-   (already covers ``pytest``, ``pytest-cov``, ``pytest-randomly``, and
-   every runtime dependency).
+1. Install as described in the setup guide (pip or uv, then
+   ``pip install -e .``); ``requirements.txt`` already covers ``pytest``,
+   ``pytest-cov``, ``pytest-randomly``, and every runtime dependency.
 2. Create a disposable ``cam_db_test`` PostgreSQL database and load the
    schema: ``psql -d cam_db_test -f schema.sql``. The test suite never
    touches ``cam_db``'s real data: ``tests/conftest.py`` always sets
@@ -21,32 +21,32 @@ Setup
 Running marked tests
 ---------------------
 
-**Always run from the repository root** (the parent of ``module_4/``),
-with the ``module_4/tests`` path included:
+**Always run from the repository root** (the parent of ``module_5/``),
+with the ``module_5/tests`` path included:
 
 .. code-block:: console
 
-   pytest module_4/tests -m "web or buttons or analysis or db or integration"
+   pytest module_5/tests -m "web or buttons or analysis or db or integration"
 
 A bare ``pytest -m "..."`` with no path, run from the repository root,
 does correctly run and pass the entire marked suite - marker filtering
 doesn't require ``pytest.ini`` to be found at all. What it doesn't do is
 enforce coverage, since ``pytest.ini``'s ``addopts`` (which sets
-``--cov=module_4/src --cov-fail-under=100``) is never loaded without the
+``--cov=module_5/src --cov-fail-under=100``) is never loaded without the
 config file being found, and pytest's config-file search only looks
 *upward* from the current directory - ``pytest.ini`` lives in
-``module_4/``, which isn't an ancestor of the repository root. It also
+``module_5/``, which isn't an ancestor of the repository root. It also
 emits a mark-registration warning per test. Concretely:
 
 - Bare ``pytest -m "..."`` from the repository root: runs and passes the
   full marked suite, but with no coverage enforcement.
-- Bare ``pytest -m "..."`` from ``module_4/``: ``pytest.ini`` *is* found,
-  but its ``--cov-config=module_4/pytest.ini`` then resolves to the
-  nonexistent ``module_4/module_4/pytest.ini`` and coverage.py raises a
+- Bare ``pytest -m "..."`` from ``module_5/``: ``pytest.ini`` *is* found,
+  but its ``--cov-config=module_5/pytest.ini`` then resolves to the
+  nonexistent ``module_5/module_5/pytest.ini`` and coverage.py raises a
   hard ``ConfigError``, so the run doesn't complete at all.
-- ``pytest module_4/tests -m "..."`` from the repository root: pytest's
-  config search starts from ``module_4/tests`` and walks upward to find
-  ``module_4/pytest.ini``, while ``--cov=module_4/src`` is correct
+- ``pytest module_5/tests -m "..."`` from the repository root: pytest's
+  config search starts from ``module_5/tests`` and walks upward to find
+  ``module_5/pytest.ini``, while ``--cov=module_5/src`` is correct
   relative to the repository root. This is the only invocation that also
   enforces the 100% coverage gate, which is why it's what this project
   actually uses and what CI runs.
@@ -55,7 +55,7 @@ Markers
 -------
 
 Every test is marked with exactly one of the following (registered in
-``pytest.ini``); running the full unmarked ``pytest module_4/tests``
+``pytest.ini``); running the full unmarked ``pytest module_5/tests``
 also works and is equivalent, since every test already carries one:
 
 - ``web`` - Flask route/page tests
@@ -65,21 +65,21 @@ also works and is equivalent, since every test already carries one:
 - ``integration`` - end-to-end flows
 
 To run a single subset, filter on just that marker, e.g.
-``pytest module_4/tests -m db``.
+``pytest module_5/tests -m db``.
 
 Coverage
 --------
 
 ``pytest.ini``'s ``--cov-fail-under=100`` enforces 100% statement
-coverage across every file under ``module_4/src``, including
+coverage across every file under ``module_5/src``, including
 ``scraping/`` (Selenium/subprocess mocked, never a real browser) and
 ``llm_hosting/`` (the real ``Llama``/``hf_hub_download`` calls mocked,
 never a real model load or network request). Its own ``[report]``
-section (read via ``--cov-config=module_4/pytest.ini``) excludes each
+section (read via ``--cov-config=module_5/pytest.ini``) excludes each
 file's ``if __name__ == "__main__":`` guard from that count, since that
 code only ever runs when a script is invoked directly, never via
 ``import``. The current terminal summary is committed at
-``module_4/coverage_summary.txt``.
+``module_5/coverage_summary.txt``.
 
 Selectors
 ---------

@@ -11,11 +11,11 @@ degree program + university names. It appends two new fields to each row:
 2. Upload these files (or import the zip).
 3. Install deps:
    ```bash
-   pip install -r requirements.txt
+   pip install -r requirements.txt && pip install -e .    # from module_5; see its README
    ```
 4. Run the API server:
    ```bash
-   python app.py --serve
+   python -m llm_hosting.app --serve    # from module_5/src
    ```
    The first run downloads a small GGUF model from Hugging Face (defaults to TinyLlama 1.1B Chat Q4_K_M).
 
@@ -27,7 +27,7 @@ degree program + university names. It appends two new fields to each row:
 ## CLI mode (no server)
 
 ```bash
-python app.py --file cleaned_applicant_data.json --stdout > full_out.jsonl
+python -m llm_hosting.app --file cleaned_applicant_data.json --stdout > full_out.jsonl
 ```
 
 ## Config (env vars)

@@ -1,4 +1,4 @@
-# Module 4: Testing and Documentation
+# Module 5: Software Assurance and Secure SQL
 
 Cameron Ela, cela1@jh.edu
 
@@ -7,7 +7,7 @@ Cameron Ela, cela1@jh.edu
 ## Table of Contents
 
 1. [Overview](#1-overview)
-2. [Setup](#2-setup)
+2. [Fresh Install](#2-fresh-install)
 3. [CLI Usage](#3-cli-usage)
 4. [Cloudflare Workaround](#4-cloudflare-workaround)
 5. [Function Reference](#5-function-reference)
@@ -33,11 +33,17 @@ Four files, each independently executable, cover this project's work:
 ### File tree
 
 ```
-module_4/
+module_5/
 |-- README.md
-|-- requirements.txt
+|-- setup.py               : makes src/ an installable package (section 2)
+|-- requirements.in        : hand-edited top-level dependencies
+|-- requirements.txt       : every dependency pinned, generated from requirements.in
 |-- pytest.ini
 |-- schema.sql             : applicants table DDL, loaded locally and by CI
+|-- least_privilege.sql    : creates the app's least-privilege database role (section 6)
+|-- .env.example           : DB_* and CHROME_BINARY variable names with placeholders
+|-- dependency.svg         : pydeps import graph (section 11)
+|-- pylint_report.txt      : Pylint 10.00/10 output (section 11)
 |-- coverage_summary.txt   : committed terminal coverage report (section 12)
 |-- venv/                  : project virtual environment
 |-- tests/                 : all test code (markers: web, buttons, analysis, db, integration)
@@ -68,34 +74,76 @@ module_4/
     |   |-- scrape.py       : browser automation, extraction, scraping CLI
     |   |-- clean.py        : converts raw rows into structured dictionaries
     |   `-- storage.py      : JSON persistence, resumable-crawl state
-    `-- llm_hosting/       : provided local-LLM standardizer, extended (section 8), kept as its own installable tool
+    `-- llm_hosting/       : provided local-LLM standardizer, extended (section 8)
 ```
 
 Every module imports its dependencies by their full package path rooted at `src/` (for example `from database.db_helpers import connect_db` or `from scraping.clean import clean_data`), and no file edits `sys.path`. Scripts under a package are therefore run as modules from `src/` (`python -m database.load_data`), which puts `src/` on the import path the same way for every entry point. Background subprocesses follow the same rule: Pull Data launches `python -m scraping.scrape` and the parallel LLM standardizer launches `python -m llm_hosting.app` workers, each with `src/` as the working directory. `paths.py` centralizes `src/`, `data/`, and `data/.state/` as constants so no file hardcodes a path to another directory more than once.
 
-## 2. Setup
+## 2. Fresh Install
 
-1. Requires Python 3.10+, Google Chrome installed locally, and a running PostgreSQL server with a database (this project uses `cam_db`) and an `applicants` table already created. From `module_4`: `psql -d cam_db -f schema.sql` (schema also shown in [section 6](#6-loading-into-postgresql)).
-2. From `module_4`, create and activate a virtual environment:
+### Prerequisites
+
+- Python 3.12 or newer
+- PostgreSQL (server running; the `psql` and `createdb` commands available)
+- Google Chrome, for scraping and Pull Data
+- Graphviz, only for regenerating `dependency.svg` (`brew install graphviz` or `sudo apt-get install graphviz`)
+- [uv](https://docs.astral.sh/uv/), only for the uv install path (`brew install uv` or `pip install uv`)
+
+Every command below runs from `module_5`.
+
+### Option A: pip + venv
+
+```
+python3 -m venv venv
+source venv/bin/activate          # Windows: venv\Scripts\activate
+pip install -r requirements.txt
+pip install -e .
+```
+
+### Option B: uv
+
+```
+uv venv venv
+source venv/bin/activate          # Windows: venv\Scripts\activate
+uv pip sync requirements.txt
+uv pip install -e .
+```
+
+`uv pip sync` makes the environment match `requirements.txt` exactly, installing anything missing and removing anything not listed, so run it before `uv pip install -e .` (otherwise it would uninstall the project again).
+
+**Why both steps:** `requirements.txt` pins every package, including indirect ones, to the exact versions this project is tested with; it is generated from the short, hand-edited `requirements.in` with `uv pip compile requirements.in --universal --python-version 3.12 -o requirements.txt`. `pip install -e .` then installs this project itself from `setup.py` as an editable package, so `app`, `database`, `scraping`, `llm_hosting`, and `paths` import the same way from any directory, for local runs, tests, and CI alike, while code changes take effect without reinstalling. Use the editable install: `paths.py` locates `data/` relative to the source tree, which a regular install would copy away from.
+
+### Database and credentials
+
+1. Create the database and the `applicants` table, as your PostgreSQL admin account (this project uses `cam_db`; any name works):
    ```
-   python3 -m venv venv
-   source venv/bin/activate        # Windows: venv\Scripts\activate
+   createdb <your_database_name>
+   psql -d <your_database_name> -f schema.sql
    ```
-3. Install dependencies: `pip install -r requirements.txt`
-4. Locate your Chrome binary's absolute path (needed for `--chrome_binary`):
-   - macOS: `/Applications/Google Chrome.app/Contents/MacOS/Google Chrome`
-   - Windows: `C:\Program Files\Google\Chrome\Application\chrome.exe`
-   - Linux: usually `google-chrome` on PATH
-5. Create the least-privilege role the app connects as (see [Credentials and least privilege](#credentials-and-least-privilege)), then set its password; psql prompts for it, so it never appears in a file or your shell history:
+2. Create the least-privilege role the app connects as (see [Credentials and least privilege](#credentials-and-least-privilege)), then set its password; psql prompts for it, so it never appears in a file or your shell history:
    ```
    psql -d <your_database_name> -f least_privilege.sql
    psql -d <your_database_name> -c "\password gradcafe_app"
    ```
-6. Copy `.env.example` to `.env` and fill in your values: `DB_HOST`, `DB_PORT`, `DB_NAME`, `DB_USER` (`gradcafe_app`), `DB_PASSWORD`, and, for Pull Data, `CHROME_BINARY` (the path from step 4). `.env` is gitignored. `run.py` and every CLI below load it automatically at startup; variables already exported in your shell take precedence over it.
+3. Copy `.env.example` to `.env` and fill in `DB_HOST`, `DB_PORT`, `DB_NAME`, `DB_USER` (`gradcafe_app`), `DB_PASSWORD`, and, for Pull Data, `CHROME_BINARY`, the absolute path to Chrome:
+   - macOS: `/Applications/Google Chrome.app/Contents/MacOS/Google Chrome`
+   - Windows: `C:\Program Files\Google\Chrome\Application\chrome.exe`
+   - Linux: the output of `which google-chrome`
+
+   `.env` is gitignored. `run.py` and every CLI load it automatically at startup; variables already exported in your shell take precedence over it.
+4. Optionally load the bundled results: `cd src && python -m database.load_data ../data/applicant_data.json`
+
+### Verify
+
+```
+cd src && python run.py
+```
+
+Open http://127.0.0.1:5000/analysis. To run the tests, see [Testing](#12-testing).
 
 ## 3. CLI Usage
 
-Each command below is run on its own from `module_5/src`; none depend on a shared entry point. Database credentials come from the `DB_*` variables in `.env` (see [Setup](#2-setup)), never from the command line. Package scripts run as modules (`python -m package.module`) so their package imports resolve. Every script resolves `data/` from its own file location via `paths.py`, so the default data paths are the same regardless of current directory.
+Each command below is run on its own from `module_5/src`; none depend on a shared entry point. Database credentials come from the `DB_*` variables in `.env` (see [Fresh Install](#2-fresh-install)), never from the command line. Package scripts run as modules (`python -m package.module`) so their package imports resolve. Every script resolves `data/` from its own file location via `paths.py`, so the default data paths are the same regardless of current directory.
 
 **Scraping:**
 ```
@@ -205,7 +253,7 @@ There is no `main.py`; `scrape.py`, `load_data.py`, `query_data.py`, and `run.py
 
 ### Table schema
 
-Checked in at `module_4/schema.sql` (also loaded by CI to set up the test
+Checked in at `module_5/schema.sql` (also loaded by CI to set up the test
 database):
 
 ```sql
@@ -375,31 +423,31 @@ pydeps run.py --noshow -T svg --max-bacon 3 --max-module-depth 2 -o ../dependenc
 
 ### Setup
 
-1. Create and activate `module_4/venv`, then `pip install -r requirements.txt` (already covers `pytest`, `pytest-cov`, `pytest-randomly`, and every runtime dependency, including `llm_hosting`'s).
+1. Install with either option in [Fresh Install](#2-fresh-install); `requirements.txt` already covers `pytest`, `pytest-cov`, `pytest-randomly`, and every runtime dependency, including `llm_hosting`'s.
 2. Create a disposable `cam_db_test` PostgreSQL database and load the same schema as `cam_db`: `psql -d cam_db_test -f schema.sql` (see [section 6](#6-loading-into-postgresql)) - the test suite never touches `cam_db`'s real data. `tests/conftest.py` always sets `DB_NAME=cam_db_test`, whatever your shell exports, and never loads `.env`. `DB_HOST`, `DB_PORT`, `DB_USER`, and `DB_PASSWORD` are used as-is when set (as CI sets them for its own Postgres service container); otherwise they default to `localhost`, `5432`, the current OS user (via `getpass.getuser()` rather than a hardcoded name, so local runs work on whatever machine the suite runs on), and a blank password. `db_connection` also refuses to run unless `cam_db_test` appears in the connection URL, so a misconfigured override can never truncate real data.
 3. The suite truncates `applicants` between tests, so it connects as the table's owner, not as `gradcafe_app` (which deliberately has no `TRUNCATE`). Local trust-authed PostgreSQL doesn't check passwords at all, which is why the default test password is blank.
 
 ### Running the suite
 
-**Always run from the repository root** (`jhu_software_concepts/`, the parent of `module_4/`), with the `module_4/tests` path included:
+**Always run from the repository root** (`jhu_software_concepts/`, the parent of `module_5/`), with the `module_5/tests` path included:
 
 ```
-pytest module_4/tests -m "web or buttons or analysis or db or integration"
+pytest module_5/tests -m "web or buttons or analysis or db or integration"
 ```
 
-The assignment instructions give the bare form (`pytest -m "web or buttons or analysis or db or integration"`, with no path) as the command that must run the full suite. Run from the repository root, that bare command does correctly run and pass the entire marked suite (`207 passed`) - pytest's `-m` marker filtering works off marks actually present on each test at collection time, and doesn't require `pytest.ini` to be found at all to do that. What it does *not* do is enforce coverage, since `pytest.ini`'s `addopts` (`--cov=module_4/src --cov-fail-under=100 ...`) is never loaded without the config file being found, and pytest's config-file search only looks *upward* from the current directory, never into subdirectories - `pytest.ini` lives in `module_4/`, which isn't an ancestor of the repository root. It also emits a `PytestUnknownMarkWarning` per mark, since registering marks (to suppress that warning) is a separate ini-only effect from `-m` filtering itself. Concretely:
+The assignment instructions give the bare form (`pytest -m "web or buttons or analysis or db or integration"`, with no path) as the command that must run the full suite. Run from the repository root, that bare command does correctly run and pass the entire marked suite (`271 passed`) - pytest's `-m` marker filtering works off marks actually present on each test at collection time, and doesn't require `pytest.ini` to be found at all to do that. What it does *not* do is enforce coverage, since `pytest.ini`'s `addopts` (`--cov=module_5/src --cov-fail-under=100 ...`) is never loaded without the config file being found, and pytest's config-file search only looks *upward* from the current directory, never into subdirectories - `pytest.ini` lives in `module_5/`, which isn't an ancestor of the repository root. It also emits a `PytestUnknownMarkWarning` per mark, since registering marks (to suppress that warning) is a separate ini-only effect from `-m` filtering itself. Concretely:
 
 - Bare `pytest -m "..."` from the repository root: runs and passes the full marked suite, but with no coverage enforcement and a mark-registration warning per test.
-- Bare `pytest -m "..."` from `module_4/`: `pytest.ini` *is* found (it's the current directory), but its `--cov-config=module_4/pytest.ini` then resolves to the nonexistent `module_4/module_4/pytest.ini` and coverage.py raises a hard `ConfigError`, so the run doesn't complete at all.
-- `pytest module_4/tests -m "..."` from the repository root: pytest's config search starts from the given path's directory, walking upward from `module_4/tests` and finding `module_4/pytest.ini` immediately, while `--cov=module_4/src` and `--cov-config=module_4/pytest.ini` are both correct relative to the repository root (the invocation directory). This is the only one of the three that also enforces the 100% coverage gate, which is why it's what this project actually uses and what CI runs.
+- Bare `pytest -m "..."` from `module_5/`: `pytest.ini` *is* found (it's the current directory), but its `--cov-config=module_5/pytest.ini` then resolves to the nonexistent `module_5/module_5/pytest.ini` and coverage.py raises a hard `ConfigError`, so the run doesn't complete at all.
+- `pytest module_5/tests -m "..."` from the repository root: pytest's config search starts from the given path's directory, walking upward from `module_5/tests` and finding `module_5/pytest.ini` immediately, while `--cov=module_5/src` and `--cov-config=module_5/pytest.ini` are both correct relative to the repository root (the invocation directory). This is the only one of the three that also enforces the 100% coverage gate, which is why it's what this project actually uses and what CI runs.
 
-Every test is marked with exactly one of `web`, `buttons`, `analysis`, `db`, or `integration` (registered in `pytest.ini`); running the full unmarked `pytest module_4/tests` also works and is equivalent, since every test already carries one of these five marks.
+Every test is marked with exactly one of `web`, `buttons`, `analysis`, `db`, or `integration` (registered in `pytest.ini`); running the full unmarked `pytest module_5/tests` also works and is equivalent, since every test already carries one of these five marks.
 
-This same command runs automatically in GitHub Actions on every push, against its own disposable Postgres service container (workflow at `.github/workflows/tests.yml`, in the repository root rather than under `module_4/`).
+This same command runs automatically in GitHub Actions on every push, against its own disposable Postgres service container (workflow at `.github/workflows/tests.yml`, in the repository root rather than under `module_5/`).
 
 ### Coverage
 
-`pytest.ini`'s `--cov-fail-under=100` enforces 100% statement coverage across every file under `module_4/src`, including `scraping/` (Selenium/subprocess mocked, never a real browser) and `llm_hosting/` (the real `Llama`/`hf_hub_download` calls mocked, never a real model load or network request). `pytest.ini`'s own `[report]` section (read via `addopts`' `--cov-config=module_4/pytest.ini`, since coverage.py otherwise only looks for a `.coveragerc` in the invocation directory) excludes each file's `if __name__ == "__main__":` guard line - and, since excluding a compound statement's header excludes its whole block, everything under it - from that count, since that code only ever runs when a script is invoked directly, never via `import`, which is all `pytest` ever does. The current terminal summary is committed at `module_4/coverage_summary.txt`.
+`pytest.ini`'s `--cov-fail-under=100` enforces 100% statement coverage across every file under `module_5/src`, including `scraping/` (Selenium/subprocess mocked, never a real browser) and `llm_hosting/` (the real `Llama`/`hf_hub_download` calls mocked, never a real model load or network request). `pytest.ini`'s own `[report]` section (read via `addopts`' `--cov-config=module_5/pytest.ini`, since coverage.py otherwise only looks for a `.coveragerc` in the invocation directory) excludes each file's `if __name__ == "__main__":` guard line - and, since excluding a compound statement's header excludes its whole block, everything under it - from that count, since that code only ever runs when a script is invoked directly, never via `import`, which is all `pytest` ever does. The current terminal summary is committed at `module_5/coverage_summary.txt`.
 
 ### Notes on test design
 
@@ -418,7 +466,7 @@ and fixtures.
 
 ### Building and viewing locally
 
-From `module_4`, with the virtual environment active:
+From `module_5`, with the virtual environment active:
 
 ```
 pip install sphinx sphinx_rtd_theme

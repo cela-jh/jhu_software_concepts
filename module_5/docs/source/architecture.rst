@@ -66,8 +66,8 @@ project; the web and ETL layers never construct SQL themselves.
 LLM standardizer (``src/llm_hosting/``)
 ------------------------------------------
 
-A self-contained tool, kept independently installable from the rest of
-the project (its own ``requirements.txt``). Adds
+A package of the project (installed with the rest by ``setup.py``,
+with its dependencies in the shared ``requirements.txt``). Adds
 ``llm-generated-program`` / ``llm-generated-university`` fields to a
 results file via a self-hosted TinyLlama model, either as a Flask
 service (``app.py``) or a CLI, with ``llm_helper.py`` providing

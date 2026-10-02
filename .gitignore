@@ -11,3 +11,5 @@ models/
 module_*.zip
 zips/
 .coverage
+*.egg-info/
+build/

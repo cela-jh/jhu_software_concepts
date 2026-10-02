@@ -92,12 +92,12 @@ Local setup
 
 **`relation "applicants" does not exist`**
     The schema hasn't been loaded into that database yet. Run
-    ``psql -d <dbname> -f schema.sql`` from ``module_4`` first (see
+    ``psql -d <dbname> -f schema.sql`` from ``module_5`` first (see
     :doc:`overview_setup`).
 
 **Bare `pytest -m "..."` reports 0% coverage, or errors with a `ConfigError` about `pytest.ini`**
     See :doc:`testing_guide` - use
-    ``pytest module_4/tests -m "web or buttons or analysis or db or integration"``
+    ``pytest module_5/tests -m "web or buttons or analysis or db or integration"``
     from the repository root, which is the one invocation that resolves
     both the marker config and the coverage path correctly.
 
@@ -134,7 +134,7 @@ Read the Docs
 ---------------
 
 **The RTD build fails trying to install `psycopg` or another compiled dependency**
-    ``module_4/docs/requirements.txt`` is a deliberately smaller,
+    ``module_5/docs/requirements.txt`` is a deliberately smaller,
     docs-only dependency list - it uses ``psycopg[binary]`` specifically so
     the build doesn't depend on a system ``libpq`` install being present on
     RTD's image, and it omits ``huggingface_hub``/``llama-cpp-python``

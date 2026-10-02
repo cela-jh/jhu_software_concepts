@@ -1,30 +1,30 @@
-........................................................................ [ 34%]
-........................................................................ [ 69%]
-...............................................................          [100%]
+........................................................................ [ 26%]
+........................................................................ [ 53%]
+........................................................................ [ 79%]
+.......................................................                  [100%]
 
 ---------- coverage: platform darwin, python 3.12.2-final-0 ----------
-Name                                     Stmts   Miss  Cover   Missing
-----------------------------------------------------------------------
-module_4/src/app/__init__.py                 7      0   100%
-module_4/src/app/pull_control.py            70      0   100%
-module_4/src/app/routes.py                  58      0   100%
-module_4/src/database/__init__.py            0      0   100%
-module_4/src/database/db_helpers.py         23      0   100%
-module_4/src/database/load_data.py         154      0   100%
-module_4/src/database/models.py             27      0   100%
-module_4/src/database/orm_queries.py        79      0   100%
-module_4/src/database/query_data.py         57      0   100%
-module_4/src/llm_hosting/__init__.py         0      0   100%
-module_4/src/llm_hosting/app.py            170      0   100%
-module_4/src/llm_hosting/llm_helper.py     125      0   100%
-module_4/src/paths.py                       11      0   100%
-module_4/src/run.py                          9      0   100%
-module_4/src/scraping/__init__.py            0      0   100%
-module_4/src/scraping/clean.py              92      0   100%
-module_4/src/scraping/scrape.py            257      0   100%
-module_4/src/scraping/storage.py            42      0   100%
-----------------------------------------------------------------------
-TOTAL                                     1181      0   100%
+Name                            Stmts   Miss  Cover   Missing
+-------------------------------------------------------------
+src/app/__init__.py                 7      0   100%
+src/app/pull_control.py            75      0   100%
+src/app/routes.py                  78      0   100%
+src/database/__init__.py            0      0   100%
+src/database/db_helpers.py         68      0   100%
+src/database/load_data.py         179      0   100%
+src/database/models.py             28      0   100%
+src/database/orm_queries.py        84      0   100%
+src/database/query_data.py        101      0   100%
+src/llm_hosting/__init__.py         0      0   100%
+src/llm_hosting/app.py            170      0   100%
+src/llm_hosting/llm_helper.py     150      0   100%
+src/paths.py                       11      0   100%
+src/run.py                         10      0   100%
+src/scraping/__init__.py            0      0   100%
+src/scraping/clean.py              91      0   100%
+src/scraping/scrape.py            292      0   100%
+src/scraping/storage.py            42      0   100%
+-------------------------------------------------------------
+TOTAL                            1386      0   100%
 
 Required test coverage of 100% reached. Total coverage: 100.00%
-207 passed in 2.40s

@@ -1,0 +1,107 @@
+name: Module 5 CI
+
+on:
+  push:
+    paths:
+      - 'module_5/**'
+  pull_request:
+    paths:
+      - 'module_5/**'
+
+jobs:
+  pylint:
+    name: Pylint
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install dependencies
+        working-directory: module_5
+        run: |
+          pip install -r requirements.txt
+          pip install -e .
+      - name: Run Pylint
+        working-directory: module_5/src
+        run: pylint app database scraping llm_hosting paths.py run.py --fail-under=10
+
+  pydeps:
+    name: Dependency graph
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install Graphviz
+        run: sudo apt-get install -y graphviz
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install dependencies
+        working-directory: module_5
+        run: |
+          pip install -r requirements.txt
+          pip install -e .
+      - name: Validate dependency graph
+        working-directory: module_5
+        run: pydeps src --max-bacon 3 --max-module-depth 2 --no-show -o /tmp/dependency.svg
+
+  snyk:
+    name: Snyk dependency scan
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install Snyk CLI
+        run: npm install -g snyk
+      # Strip Windows-only platform markers that Snyk's resolver cannot
+      # handle on Linux (cffi and pycparser carry os_name == 'nt').
+      - name: Prepare scan file
+        run: |
+          mkdir -p /tmp/snyk-scan
+          grep -v "os_name == 'nt'" module_5/requirements.txt \
+            > /tmp/snyk-scan/requirements.txt
+      - name: Run Snyk test
+        working-directory: /tmp/snyk-scan
+        env:
+          SNYK_TOKEN: ${{ secrets.SNYK_TOKEN }}
+        run: snyk test --skip-unresolved
+
+  pytest:
+    name: Pytest
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: cam_db_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install dependencies
+        working-directory: module_5
+        run: |
+          pip install -r requirements.txt
+          pip install -e .
+      - name: Load applicants schema
+        env:
+          PGPASSWORD: postgres
+        run: psql -h localhost -U postgres -d cam_db_test -f module_5/schema.sql
+      - name: Run Pytest
+        working-directory: module_5
+        env:
+          DB_HOST: localhost
+          DB_PORT: '5432'
+          DB_NAME: cam_db_test
+          DB_USER: postgres
+          DB_PASSWORD: postgres
+        run: pytest tests/ -v --cov=src --cov-report=term-missing

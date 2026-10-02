@@ -482,8 +482,9 @@ open docs/build/index.html        # Linux: xdg-open docs/build/index.html
 
 ### CLAUDE
 
-- Wrote test cases in small sets, stopping for human review and modification after each test file with back-and-forth questions and explanations for understanding and covering edge cases
+- Examined SQL queries for security risks
+- Wrote new test cases
+- Fixed issues with linting according to author specifications
 - Considered edge cases and helped develop error-catching methods
 - Executed author-selected refactoring, repairing broken filepaths and imports and ensuring they wouldn't break with future refactoring
-- Converted comments and docstrings to Sphinx format and generated Sphinx documentation
 - Created most of this README

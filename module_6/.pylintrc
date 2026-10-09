@@ -1,0 +1,5 @@
+[MESSAGES CONTROL]
+# R0801: The web and worker services each carry their own copy of the
+# analytics SQL so neither service imports from the other. The duplication
+# is an intentional architectural boundary, not an oversight.
+disable=duplicate-code

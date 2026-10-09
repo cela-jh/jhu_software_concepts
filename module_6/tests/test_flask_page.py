@@ -32,21 +32,20 @@ def _rule_methods(app, path):
 
 @pytest.mark.web
 def test_app_factory_creates_required_routes(app):
-    """create_app() should register the analysis page and every route
-    the Pull Data / Update Analysis buttons call."""
+    """create_app() should register the analysis page and the two button
+    endpoints. /pull/cancel and /pull/status no longer exist because the
+    web service delegates all data operations to the worker via RabbitMQ."""
     rule_paths = {rule.rule for rule in app.url_map.iter_rules()}
 
     assert "/analysis" in rule_paths
     assert "/pull-data" in rule_paths
-    assert "/pull/cancel" in rule_paths
-    assert "/pull/status" in rule_paths
     assert "/update-analysis" in rule_paths
     assert "/analysis/accepted-since-2024" in rule_paths
+    assert "/pull/cancel" not in rule_paths
+    assert "/pull/status" not in rule_paths
 
     assert "GET" in _rule_methods(app, "/analysis")
-    assert "GET" in _rule_methods(app, "/pull/status")
     assert "POST" in _rule_methods(app, "/pull-data")
-    assert "POST" in _rule_methods(app, "/pull/cancel")
     assert "POST" in _rule_methods(app, "/update-analysis")
     assert "GET" in _rule_methods(app, "/analysis/accepted-since-2024")
 

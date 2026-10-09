@@ -1,19 +1,15 @@
 """
 `routes.py`
 The analysis page route, and the Pull Data / Update Analysis endpoints
-behind its two buttons.
+behind its two buttons. Both buttons publish tasks to RabbitMQ via
+publisher.publish_task; the worker processes them asynchronously.
 """
-import contextlib
-import io
-import os
-
-from flask import Blueprint, jsonify, render_template, request
+from flask import Blueprint, current_app, jsonify, render_template, request
 from sqlalchemy.exc import OperationalError
 
 from database.db_helpers import (
     DatabaseConfigError, DatabaseUnavailableError, database_url_from_env,
 )
-from database.load_data import load_data
 from database.models import get_session
 from database.orm_queries import ALL_ORM_ANSWERS
 from database.query_data import (
@@ -21,9 +17,7 @@ from database.query_data import (
     NO_ACCEPTED_RESULTS, QUESTION_QUERY, InvalidSchoolInput, fetch_accepted_since,
     normalize_school,
 )
-from paths import DEFAULT_DATA_FILE
-
-from . import pull_control
+from publisher import publish_task
 
 bp = Blueprint("analysis", __name__)
 
@@ -35,8 +29,8 @@ DATABASE_UNAVAILABLE_MESSAGE = (
 
 def _database_url():
     """
-    Build the connection URL from the DB_* environment variables, or
-    explain what is missing instead of raising.
+    Build the connection URL from environment variables, or explain
+    what is missing instead of raising.
 
     :returns: A (connection URL, None) pair, or (None, message) naming
         the missing or invalid variables.
@@ -51,14 +45,11 @@ def _database_url():
 @bp.route("/analysis")
 def analysis():
     """
-    Run every Part 2 analysis question through the SQLAlchemy ORM and
-    render the results page, along with the Pull Data status so a page
-    reload during a pull still shows the Cancel button and its log.
+    Run every analysis question through the SQLAlchemy ORM and render
+    the results page.
 
-    :returns: The rendered analysis page; a plain 500 error message if
-        a DB_* variable isn't set; or a plain, readable 503 "database
-        unavailable" message if PostgreSQL can't actually be reached
-        (e.g. it's down), rather than an unhandled 500.
+    :returns: The rendered analysis page; 500 if a database variable
+        isn't set; 503 if PostgreSQL can't be reached.
     :rtype: str or tuple(str, int)
     """
     database_url, problem = _database_url()
@@ -82,22 +73,17 @@ def analysis():
         accepted_rows=accepted_rows or [NO_ACCEPTED_RESULTS],
         default_school=DEFAULT_SCHOOL,
         max_school_length=MAX_SCHOOL_LENGTH,
-        pull_running=pull_control.is_running(),
-        pull_lines=pull_control.recent_lines(),
     )
 
 
 @bp.route(f"/analysis/accepted-since-{ACCEPTED_SINCE_YEAR}")
 def accepted_since():
     """
-    Re-run only the A3 query for the school typed into its text box. The
-    `school` query argument is validated by normalize_school() and then
-    only ever reaches PostgreSQL as a bound parameter.
+    Re-run only the A3 query for the school typed into its text box.
 
-    :returns: JSON ``{ok, school, rows, message}``: 200 with the
-        matching result lines (at most the enforced query limit); 400
-        with ``ok`` ``False`` if the school name is invalid; 500 if a
-        DB_* variable isn't set; 503 if PostgreSQL can't be reached.
+    :returns: JSON ``{ok, school, rows, message}``: 200 with matching
+        rows; 400 for an invalid school name; 500 if the database URL is
+        misconfigured; 503 if PostgreSQL can't be reached.
     :rtype: tuple(flask.Response, int)
     """
     database_url, problem = _database_url()
@@ -119,98 +105,46 @@ def accepted_since():
 @bp.route("/pull-data", methods=["POST"])
 def pull_start():
     """
-    Start a Grad Cafe pull in the background if one isn't already
-    running.
+    Enqueue a scrape_new_data task via RabbitMQ and return 202 so the
+    request completes immediately while the worker processes the task.
 
-    :returns: JSON ``{ok, status, message}``. ``ok``/``status`` are
-        ``True``/``"started"`` on success, or ``ok`` ``False`` with
-        status ``"error"`` if CHROME_BINARY or a DB_* variable isn't set.
-        409 with ``ok`` ``False``, ``busy`` ``True``, and status
-        ``"already_running"`` if a pull is already in progress.
-    :rtype: flask.Response or tuple(flask.Response, int)
+    :returns: 202 JSON ``{ok, status, task, message}`` on success; 503
+        if the broker is unreachable.
+    :rtype: tuple(flask.Response, int)
     """
-    chrome_binary = os.getenv("CHROME_BINARY")
-    if not chrome_binary:
-        return jsonify(ok=False, status="error", message=(
-            "Set the CHROME_BINARY environment variable to your Chrome "
-            "binary's path before using Pull Data."
-        ))
-
-    database_url, problem = _database_url()
-    if problem:
-        return jsonify(ok=False, status="error", message=problem)
-
-    started = pull_control.start(chrome_binary, database_url)
-    if not started:
+    try:
+        publish_task("scrape_new_data")
         return jsonify(
-            ok=False, busy=True, status="already_running",
-            message="A pull is already in progress.",
-        ), 409
-    return jsonify(ok=True, status="started", message="Pull started.")
-
-
-@bp.route("/pull/cancel", methods=["POST"])
-def pull_cancel():
-    """
-    Cancel the running pull, if the scrape itself is still going.
-    Whatever it already collected is still uploaded to PostgreSQL
-    afterward.
-
-    :returns: JSON ``{status, message}``, where ``status`` is
-        ``"cancelling"``, ``"finishing"``, or ``"not_running"``.
-    :rtype: flask.Response
-    """
-    result = pull_control.cancel()
-    messages = {
-        "cancelling": "Cancelling: finishing the current page and uploading collected results.",
-        "finishing": "The scrape has already finished; results are still being uploaded.",
-        "not_running": "No pull is currently running.",
-    }
-    return jsonify(status=result, message=messages[result])
-
-
-@bp.route("/pull/status")
-def pull_status():
-    """
-    Report whether a pull is currently running and its most recent
-    status lines, for the page to poll while a pull is active.
-
-    :returns: JSON ``{running, lines}``.
-    :rtype: flask.Response
-    """
-    return jsonify(running=pull_control.is_running(), lines=pull_control.recent_lines())
+            ok=True, status="queued", task="scrape_new_data",
+            message="Pull queued. New data will be available shortly.",
+        ), 202
+    except Exception:  # pylint: disable=broad-exception-caught
+        current_app.logger.exception("Failed to publish scrape_new_data")
+        return jsonify(
+            ok=False, status="error",
+            message="Could not queue the task. Please try again.",
+        ), 503
 
 
 @bp.route("/update-analysis", methods=["POST"])
 def update_analysis():
     """
-    Load whatever is currently in the results file into PostgreSQL (the
-    same upsert load_data() always does) so data added by hand, by the
-    LLM standardizer, or by a finished pull is reflected without
-    starting a new scrape. analysis() already runs fresh queries on
-    every GET /analysis, so the client reloads afterward to see the
-    results. Busy-gated like Pull Data since a running pull's own upload
-    step already owns the same table.
+    Enqueue a recompute_analytics task via RabbitMQ and return 202 so
+    the request completes immediately while the worker processes it.
 
-    :returns: JSON ``{ok, status, message}``. 409 with ``ok`` ``False``,
-        ``busy`` ``True``, and status ``"busy"`` if a pull is running;
-        500 with ``ok`` ``False`` and status ``"error"`` if a DB_*
-        variable isn't set; otherwise 200 with ``ok`` ``True``,
-        status ``"ok"``, and load_data()'s own summary as the message.
-    :rtype: flask.Response or tuple(flask.Response, int)
+    :returns: 202 JSON ``{ok, status, task, message}`` on success; 503
+        if the broker is unreachable.
+    :rtype: tuple(flask.Response, int)
     """
-    if pull_control.is_running():
-        return jsonify(ok=False, busy=True, status="busy", message=(
-            "New data is currently being retrieved. Please wait for the "
-            "pull to finish before updating."
-        )), 409
-
-    database_url, problem = _database_url()
-    if problem:
-        return jsonify(ok=False, status="error", message=problem), 500
-
-    buffer = io.StringIO()
-    with contextlib.redirect_stdout(buffer):
-        load_data(DEFAULT_DATA_FILE, database_url)
-
-    return jsonify(ok=True, status="ok", message=buffer.getvalue().strip() or "Analysis updated.")
+    try:
+        publish_task("recompute_analytics")
+        return jsonify(
+            ok=True, status="queued", task="recompute_analytics",
+            message="Analytics recompute queued. Data will be refreshed shortly.",
+        ), 202
+    except Exception:  # pylint: disable=broad-exception-caught
+        current_app.logger.exception("Failed to publish recompute_analytics")
+        return jsonify(
+            ok=False, status="error",
+            message="Could not queue the task. Please try again.",
+        ), 503

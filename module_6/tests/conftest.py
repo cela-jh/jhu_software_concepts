@@ -1,9 +1,8 @@
 """
 `conftest.py`
-Shared pytest fixtures for the GradCafeAnalytics test suite. Puts
-src/web/ on the import path so tests can import `app`, `database`,
-and `paths` the same way the application itself does when run.py is
-run directly, then hands out a fresh Flask app and test client per test.
+Shared pytest fixtures for the GradCafeAnalytics test suite. Puts both
+src/web/ and src/worker/ on the import path so tests can import `app`,
+`database`, `publisher`, and `etl` the same way the services do at runtime.
 """
 import getpass
 import os
@@ -12,15 +11,17 @@ from pathlib import Path
 from urllib.parse import quote_plus
 
 SRC_DIR = Path(__file__).resolve().parent.parent / "src" / "web"
+WORKER_SRC_DIR = Path(__file__).resolve().parent.parent / "src" / "worker"
 sys.path.insert(0, str(SRC_DIR))
+sys.path.insert(0, str(WORKER_SRC_DIR))
 
 import pytest
 
 from app import create_app
-from app import pull_control
 from database.db_helpers import connect_db, disconnect_db
 
 TEST_DATABASE_NAME = "cam_db_test"
+
 
 def _build_test_database_url():
     """
@@ -84,22 +85,6 @@ def app():
 def client(app):
     """Returns a Flask test client bound to the `app` fixture."""
     return app.test_client()
-
-
-def _reset_pull_control_state():
-    with pull_control._lock:
-        pull_control._lines.clear()
-
-
-@pytest.fixture(autouse=True)
-def reset_pull_control():
-    """
-    Resets pull_control's module-level status lines before and after
-    every test so one test's output cannot leak into the next.
-    """
-    _reset_pull_control_state()
-    yield
-    _reset_pull_control_state()
 
 
 @pytest.fixture

@@ -31,10 +31,10 @@ def test_load_update_render_end_to_end(client, monkeypatch, tmp_path, db_connect
     ]))
     load_data.load_data(data_file, database_url)
 
-    monkeypatch.setattr("app.routes.load_data", lambda filepath, url: True)
+    monkeypatch.setattr("app.routes.publish_task", lambda kind, **kw: None)
     update_response = client.post("/update-analysis")
-    assert update_response.status_code == 200
-    assert update_response.get_json()["status"] == "ok"
+    assert update_response.status_code == 202
+    assert update_response.get_json()["status"] == "queued"
 
     render_response = client.get("/analysis")
     assert render_response.status_code == 200

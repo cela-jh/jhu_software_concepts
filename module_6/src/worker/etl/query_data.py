@@ -7,7 +7,7 @@ inserted with sql.Identifier, and all values are bound parameters.
 This module intentionally omits connection management; the consumer
 passes an open psycopg connection into each handler.
 """
-from typing import Callable, NamedTuple
+from typing import NamedTuple
 
 from psycopg import sql
 from psycopg.rows import dict_row

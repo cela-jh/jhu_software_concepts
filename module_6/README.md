@@ -4,17 +4,18 @@ GradCafe admissions analytics as a containerized microservice stack.
 
 ## Stack
 
-| Service  | Description                              | Port  |
-|----------|------------------------------------------|-------|
-| `web`    | Flask analysis app                       | 8080  |
-| `worker` | RabbitMQ consumer, data ingestion        |       |
-| `db`     | PostgreSQL 16                            | 5432  |
-| `rabbitmq` | RabbitMQ 3.13 with management UI      | 15672 |
+| Service    | Description                              | Port  |
+|------------|------------------------------------------|-------|
+| `web`      | Flask analysis app                       | 8080  |
+| `worker`   | RabbitMQ consumer, data ingestion        |       |
+| `loader`   | One-shot seed loader (exits after run)   |       |
+| `db`       | PostgreSQL 16                            | 5432  |
+| `rabbitmq` | RabbitMQ 3.13 with management UI         | 15672 |
 
 ## Prerequisites
 
 - Docker Engine (or Docker Desktop) with the Compose plugin
-- A `.env` file at `module_6/` (copy `.env.example` and fill in values)
+- A `.env` file at `module_6/` — copy `.env.example` and fill in real values
 
 ## Run
 
@@ -23,23 +24,96 @@ cd module_6
 docker compose up --build
 ```
 
-- Flask app: http://localhost:8080
+- Flask app: http://localhost:8080/analysis
 - RabbitMQ management: http://localhost:15672 (guest/guest, dev only)
+
+## Testing
+
+Install the package in editable mode with dev extras, then run pytest from
+`module_6/`. The suite requires a PostgreSQL instance named `cam_db_test`.
+
+```bash
+cd module_6
+pip install -e ".[dev]"
+# DATABASE_URL must point at cam_db_test, e.g.:
+export DATABASE_URL=postgresql://user:password@localhost:5432/cam_db_test
+pytest tests/
+```
+
+`pytest.ini` sets `--cov=src/web --cov=src/worker --cov-fail-under=100`, so
+all coverage gaps cause the run to fail.
+
+## Security
+
+### SQL injection defenses
+
+All SQL in this project uses parameterized queries — values are always passed
+as bound parameters, never formatted into query strings:
+
+- **psycopg** (worker `etl/`) uses `cursor.execute(sql, params)` with `%s` or
+  `%(name)s` placeholders throughout `incremental_scraper.py` and `query_data.py`.
+- **SQLAlchemy ORM** (web `database/`) binds values through the ORM layer;
+  no raw string interpolation is used in any query.
+- **LIKE/ILIKE patterns** are additionally escaped with `escape_like()` in
+  `query_data.py` before being passed as bound parameters, preventing `%` or
+  `_` wildcards from matching unintended rows.
+
+### LIMIT enforcement
+
+Every SELECT that could return many rows is capped with an enforced LIMIT:
+
+- `query_data.py` defines `QUERY_LIMIT = 50` and `clamp_limit()` to keep the
+  value in `[MIN_LIMIT, MAX_LIMIT]`. Every query in `QUESTION_QUERY` is
+  composed through `_limited_query()`, which appends `LIMIT %(limit)s` as a
+  bound parameter.
+- The web ORM layer applies equivalent limits through SQLAlchemy's `.limit()`
+  on every query in `orm_queries.py`.
+
+### Snyk dependency scanning
+
+The CI workflow (`module_6_ci.yml`) runs Snyk against both service
+`requirements.txt` files after installing packages. This catches known
+CVEs in Flask, psycopg, pika, and their transitive dependencies before
+they reach a container image.
+
+### Error handling
+
+- Database connection errors (`OperationalError`, `DatabaseUnavailableError`)
+  are caught at the route level and returned as generic 503 messages. No raw
+  libpq error text (host, port, user) is ever sent to the client.
+- `DatabaseConfigError` messages describe only which environment variable is
+  missing, never its value.
+- Flask runs with `debug=False`; the Werkzeug interactive debugger is never
+  exposed.
+
+## CI/CD
+
+GitHub Actions (`module_6_ci.yml`) runs on every push or PR that touches
+`module_6/`:
+
+| Job        | What it checks                                          |
+|------------|---------------------------------------------------------|
+| `pylint`   | 10/10 lint score across `src/web/` and `src/worker/`   |
+| `pytest`   | 100% coverage gate against a live Postgres service      |
+| `snyk`     | Known CVEs in both service dependency sets              |
+| `pydeps`   | Dependency graph renders without errors                 |
 
 ## Environment Variables
 
-| Variable        | Used by     | Description                          |
-|-----------------|-------------|--------------------------------------|
-| `POSTGRES_USER` | db          | PostgreSQL superuser name            |
-| `POSTGRES_PASSWORD` | db      | PostgreSQL superuser password        |
-| `POSTGRES_DB`   | db          | Database name                        |
-| `DATABASE_URL`  | web, worker | Full PostgreSQL connection string    |
-| `RABBITMQ_URL`  | web, worker | Full AMQP connection string          |
-| `FLASK_ENV`     | web         | `development` or `production`        |
-| `FLASK_SECRET`  | web         | Flask secret key                     |
-| `SEED_JSON`     | worker      | Path to applicant data JSON in container |
-| `TARGET_TABLE`  | worker      | Target table name (`applicants`)     |
-| `ID_KEY`        | worker      | Primary-key column (`p_id`)          |
+| Variable           | Used by         | Description                                    |
+|--------------------|-----------------|------------------------------------------------|
+| `POSTGRES_USER`    | db              | PostgreSQL superuser name                      |
+| `POSTGRES_PASSWORD`| db              | PostgreSQL superuser password                  |
+| `POSTGRES_DB`      | db              | Database name                                  |
+| `RABBITMQ_URL`     | web, worker     | Full AMQP connection string                    |
+| `FLASK_ENV`        | web             | `development` or `production`                  |
+| `FLASK_SECRET`     | web             | Flask secret key                               |
+| `SEED_JSON`        | worker          | Path to applicant data JSON in container       |
+| `TARGET_TABLE`     | worker          | Target table name (`applicants`)               |
+| `ID_KEY`           | worker          | Primary-key column (`p_id`)                    |
+
+`DATABASE_URL` is not stored in `.env`; it is constructed by `docker-compose.yml`
+from `POSTGRES_*` vars so credentials are defined in exactly one place.
 
 ## Docker Hub
 
@@ -48,25 +122,24 @@ Images are published at:
 - `<dockerhub-user>/module_6_web:v1`
 - `<dockerhub-user>/module_6_worker:v1`
 
-Pull and run:
-
-```bash
-docker pull <dockerhub-user>/module_6_web:v1
-docker pull <dockerhub-user>/module_6_worker:v1
-docker compose up
-```
-
 ## Architecture Notes
 
 ### Why `database/` lives under `src/web/` and not `src/db/`
 
-Docker's build context is the directory passed to `build:` in docker-compose (e.g., `./web`). The daemon can only see files inside that directory, so a `COPY ../db/database .` instruction would fail. The alternatives are widening the build context (sends every file under `src/` to the daemon, including large data files) or multi-stage builds (an earlier `FROM` stage holds shared code and a later stage copies selectively from it), both of which add complexity the project does not need. Instead, each service owns its own copy of the code it uses: the web service has `src/web/database/` for read queries and ORM access, and the worker has `src/worker/etl/` for write operations and analytics. The duplication is intentional and keeps each service self-contained within its build context.
+Docker's build context is the directory passed to `build:` in docker-compose.
+The daemon can only see files inside that directory, so a `COPY ../db/database .`
+instruction would fail. The alternatives — widening the build context or
+multi-stage builds — add complexity the project does not need. Instead, each
+service owns its own copy of the code it uses: the web service has
+`src/web/database/` for read queries and ORM access, and the worker has
+`src/worker/etl/` for write operations and analytics. The duplication is
+intentional and keeps each service self-contained within its build context.
 
 ## Local Development (without Docker)
 
 ```bash
 cd module_6
 pip install -e ".[dev]"
-# Set DB_* or DATABASE_URL, then:
+# Set DATABASE_URL (or POSTGRES_* vars), then:
 python src/web/run.py
 ```

@@ -1,0 +1,202 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
+    <title>Module 6 Analysis</title>
+</head>
+<body data-pull-running="{{ 'true' if pull_running else 'false' }}">
+    <header>Cameron Ela - Module 6 Grad School Cafe Data Analysis</header>
+    <hr class="divider">
+    <div class="controls">
+        <h1>Analysis</h1>
+        <div class="buttons">
+            <button id="pull-button" data-testid="pull-data-btn" type="button">Pull Data</button>
+            <button id="update-button" data-testid="update-analysis-btn" type="button">Update Analysis</button>
+        </div>
+    </div>
+    <p class="explanation">
+        Pull Data checks Grad Cafe for newly submitted application results
+        and adds new records to the database. It scrapes from the newest
+        entries until it reaches ones already in the database, or until
+        cancelled, so it may take some time depending on how much new data
+        is available.
+    </p>
+    <p id="status-message" class="status-message"></p>
+    <div id="log-box" class="log-box" hidden>
+        {% for line in pull_lines %}
+        <p class="log-line">{{ line }}</p>
+        {% endfor %}
+    </div>
+    <div class="results">
+        {% for question, answer in results %}
+        <div class="result-box">
+            <p class="question">{{ question }}</p>
+            <p class="answer">Answer: {{ answer }}</p>
+        </div>
+        {% endfor %}
+        <div class="result-row">
+            <div class="result-box" data-testid="accepted-since-box">
+                <p class="question">{{ accepted_question }}</p>
+                <div class="answer">
+                    Answer:
+                    <ul id="accepted-since-list" class="accepted-list" data-testid="accepted-since-list">
+                        {% for line in accepted_rows %}
+                        <li>{{ line }}</li>
+                        {% endfor %}
+                    </ul>
+                </div>
+            </div>
+            <form id="school-form" class="school-form"
+                  data-endpoint="{{ url_for('analysis.accepted_since') }}">
+                <label for="school-input">School name contains</label>
+                <input id="school-input" name="school" type="text" data-testid="school-input"
+                       maxlength="{{ max_school_length }}" value="{{ default_school }}">
+                <button id="school-submit" data-testid="school-submit" type="submit">Submit</button>
+                <p id="school-error" class="school-error" data-testid="school-error"></p>
+            </form>
+        </div>
+    </div>
+    <script>
+        const pullButton = document.getElementById("pull-button");
+        const updateButton = document.getElementById("update-button");
+        const statusMessage = document.getElementById("status-message");
+        const logBox = document.getElementById("log-box");
+        let pollTimer = null;
+
+        function showLines(lines) {
+            logBox.innerHTML = "";
+            lines.forEach((line) => {
+                const p = document.createElement("p");
+                p.className = "log-line";
+                p.textContent = line;
+                logBox.appendChild(p);
+            });
+            logBox.hidden = lines.length === 0;
+        }
+
+        function setRunningUi(running) {
+            pullButton.textContent = running ? "Cancel" : "Pull Data";
+            pullButton.disabled = false;
+        }
+
+        function poll() {
+            fetch("/pull/status")
+                .then((response) => response.json())
+                .then((data) => {
+                    showLines(data.lines);
+                    if (data.running) {
+                        setRunningUi(true);
+                    } else {
+                        setRunningUi(false);
+                        stopPolling();
+                        if (data.lines.length > 0) {
+                            statusMessage.textContent = "Pull finished. Reloading with the latest data...";
+                            setTimeout(() => window.location.reload(), 1500);
+                        }
+                    }
+                });
+        }
+
+        function startPolling() {
+            if (pollTimer === null) {
+                pollTimer = setInterval(poll, 1500);
+            }
+        }
+
+        function stopPolling() {
+            if (pollTimer !== null) {
+                clearInterval(pollTimer);
+                pollTimer = null;
+            }
+        }
+
+        pullButton.addEventListener("click", () => {
+            pullButton.disabled = true;
+            if (pullButton.textContent === "Cancel") {
+                statusMessage.textContent = "";
+                fetch("/pull/cancel", { method: "POST" })
+                    .then((response) => response.json())
+                    .then((data) => {
+                        statusMessage.textContent = data.message;
+                        pullButton.disabled = false;
+                    });
+            } else {
+                statusMessage.textContent = "";
+                fetch("/pull-data", { method: "POST" })
+                    .then((response) => response.json())
+                    .then((data) => {
+                        statusMessage.textContent = data.message;
+                        pullButton.disabled = false;
+                        if (data.ok || data.busy) {
+                            setRunningUi(true);
+                            startPolling();
+                        }
+                    });
+            }
+        });
+
+        updateButton.addEventListener("click", () => {
+            updateButton.disabled = true;
+            statusMessage.textContent = "";
+            fetch("/update-analysis", { method: "POST" })
+                .then((response) => response.json().then((data) => ({ ok: response.ok, data })))
+                .then(({ ok, data }) => {
+                    if (ok) {
+                        window.location.reload();
+                    } else {
+                        statusMessage.textContent = data.message;
+                        updateButton.disabled = false;
+                    }
+                });
+        });
+
+        const schoolForm = document.getElementById("school-form");
+        const schoolInput = document.getElementById("school-input");
+        const schoolSubmit = document.getElementById("school-submit");
+        const schoolError = document.getElementById("school-error");
+        const acceptedList = document.getElementById("accepted-since-list");
+
+        // textContent (never innerHTML) so result text or an echoed
+        // school name can never be interpreted as markup
+        function showAccepted(lines) {
+            acceptedList.innerHTML = "";
+            lines.forEach((line) => {
+                const item = document.createElement("li");
+                item.textContent = line;
+                acceptedList.appendChild(item);
+            });
+        }
+
+        // Re-runs only A3: URLSearchParams encodes the typed text, and
+        // the server binds it as a query parameter.
+        schoolForm.addEventListener("submit", (event) => {
+            event.preventDefault();
+            schoolSubmit.disabled = true;
+            schoolError.textContent = "";
+            const query = new URLSearchParams({ school: schoolInput.value });
+            fetch(`${schoolForm.dataset.endpoint}?${query}`)
+                .then((response) => response.json())
+                .then((data) => {
+                    if (data.ok) {
+                        showAccepted(data.rows.length > 0 ? data.rows : [data.message]);
+                    } else {
+                        schoolError.textContent = data.message;
+                    }
+                })
+                .catch(() => {
+                    schoolError.textContent = "Could not reach the server. Please try again.";
+                })
+                .finally(() => {
+                    schoolSubmit.disabled = false;
+                });
+        });
+
+        if (document.body.dataset.pullRunning === "true") {
+            setRunningUi(true);
+            startPolling();
+        }
+    </script>
+</body>
+</html>

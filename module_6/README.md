@@ -175,3 +175,14 @@ pip install -e ".[dev]"
 # Set DATABASE_URL (or POSTGRES_* vars), then:
 python src/web/run.py
 ```
+
+## Citations
+
+### CLAUDE
+
+- Helped refactor code away from scraping
+- Wrote new test cases
+- Considered edge cases and helped develop error-catching methods
+- Error-checked new functions in `load_data.py` and `publisher.py`, among other files
+- Modified .env.example to fit this assignment's scope
+- Created most of this README

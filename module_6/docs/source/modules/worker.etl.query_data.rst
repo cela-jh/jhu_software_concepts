@@ -1,7 +1,7 @@
-scraping.scrape module
+etl.query\_data module
 ======================
 
-.. automodule:: scraping.scrape
+.. automodule:: etl.query_data
    :members:
    :show-inheritance:
    :undoc-members:

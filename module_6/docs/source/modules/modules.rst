@@ -6,7 +6,7 @@ API Reference
 
    app
    database
-   llm_hosting
    paths
+   publisher
    run
-   scraping
+   worker

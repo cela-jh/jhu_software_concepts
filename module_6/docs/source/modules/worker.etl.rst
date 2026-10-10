@@ -1,5 +1,5 @@
-scraping package
-================
+etl package
+===========
 
 Submodules
 ----------
@@ -7,14 +7,13 @@ Submodules
 .. toctree::
    :maxdepth: 4
 
-   scraping.clean
-   scraping.scrape
-   scraping.storage
+   worker.etl.incremental_scraper
+   worker.etl.query_data
 
 Module contents
 ---------------
 
-.. automodule:: scraping
+.. automodule:: etl
    :members:
    :show-inheritance:
    :undoc-members:

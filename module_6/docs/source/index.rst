@@ -6,9 +6,9 @@
 GradCafe Analytics documentation
 ================================
 
-Documentation for GradCafeAnalytics: the Flask analysis webpage, the
-PostgreSQL loading and querying layer, the GradCafe scraper, and the
-local LLM standardizer.
+Documentation for GradCafeAnalytics: the Flask analysis web service,
+the PostgreSQL loading and querying layer, the RabbitMQ publisher, and
+the asynchronous worker service.
 
 .. toctree::
    :maxdepth: 2

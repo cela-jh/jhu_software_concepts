@@ -14,7 +14,7 @@ GradCafe admissions analytics as a containerized microservice stack.
 
 ## Prerequisites
 
-- Docker Engine (or Docker Desktop) with the Compose plugin
+- **Docker Engine >= 24** or **Docker Desktop** with the Compose v2 plugin (`docker compose`, not `docker-compose`). Install at https://docs.docker.com/get-docker/.
 - A `.env` file at `module_6/` — copy `.env.example` and fill in real values
 
 ## Run
@@ -26,6 +26,29 @@ docker compose up --build
 
 - Flask app: http://localhost:8080/analysis
 - RabbitMQ management: http://localhost:15672 (guest/guest, dev only)
+
+## Usage
+
+The analysis page has two action buttons:
+
+| Button | Task published | What the worker does |
+|---|---|---|
+| **Pull Data** | `scrape_new_data` | Reads `applicant_data.json`, inserts records whose `p_id` exceeds the stored watermark, advances the watermark |
+| **Update Analysis** | `recompute_analytics` | Re-runs all analytics queries against the current database contents |
+
+Both buttons return HTTP 202 immediately. The worker processes the task asynchronously; reload the page after a moment to see updated results.
+
+## How It Works
+
+On `docker compose up --build`:
+
+1. **`db`** starts and runs `src/db/init.sql`, creating the `applicants` and `ingestion_watermarks` tables.
+2. **`loader`** runs `load_data.py` once, seeding PostgreSQL with `applicant_data.json` via upsert, then exits.
+3. **`web`** starts Flask on port 8080. The analysis page reads results directly from PostgreSQL on each page load.
+4. **`worker`** starts `consumer.py`, connects to RabbitMQ, and waits for messages.
+5. **`rabbitmq`** brokers messages between `web` and `worker`.
+
+When a button is clicked, `web` publishes a JSON task message to a durable RabbitMQ queue and returns HTTP 202 without waiting. `worker` receives the message, opens a database transaction, runs the appropriate handler, commits, and acks. If anything fails, the transaction is rolled back and the message is nacked (not requeued).
 
 ## Testing
 
@@ -119,8 +142,16 @@ from `POSTGRES_*` vars so credentials are defined in exactly one place.
 
 Images are published at:
 
-- `<dockerhub-user>/module_6_web:v1`
-- `<dockerhub-user>/module_6_worker:v1`
+- https://hub.docker.com/r/celajh/module_6_web
+- https://hub.docker.com/r/celajh/module_6_worker
+
+Pull and run:
+
+```bash
+docker pull celajh/module_6_web:v1
+docker pull celajh/module_6_worker:v1
+docker compose up
+```
 
 ## Architecture Notes
 

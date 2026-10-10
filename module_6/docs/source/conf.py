@@ -6,7 +6,8 @@
 import os
 import sys
 
-sys.path.insert(0, os.path.abspath("../../src"))
+sys.path.insert(0, os.path.abspath("../../src/web"))
+sys.path.insert(0, os.path.abspath("../../src/worker"))
 
 # -- Project information -----------------------------------------------------
 # https://www.sphinx-doc.org/en/master/usage/configuration.html#project-information
@@ -15,8 +16,8 @@ project = 'GradCafe Analytics'
 copyright = '2026, Cameron Ela'
 author = 'Cameron Ela'
 
-version = '1.0'
-release = '1.0'
+version = '0.6'
+release = '0.6.0'
 
 # -- General configuration ---------------------------------------------------
 # https://www.sphinx-doc.org/en/master/usage/configuration.html#general-configuration

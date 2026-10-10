@@ -1,5 +1,6 @@
 # Module 6: Deploy Anywhere
 
+Cameron Ela, cela1@jh.edu
 GradCafe admissions analytics as a containerized microservice stack.
 
 ## Stack

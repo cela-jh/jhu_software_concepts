@@ -221,11 +221,13 @@ def test_cli_exits_nonzero_when_database_unreachable(tmp_path):
     data_file = tmp_path / "applicant_data.json"
     data_file.write_text(json.dumps([fake_applicant_row(9999999)]))
 
-    # Remove DATABASE_URL so database_url_from_env() falls back to DB_*
-    # vars; leaving it set would cause the subprocess to connect to the
-    # test database instead of the unreachable one.
-    subprocess_env = {**os.environ, "DB_NAME": "definitely_not_a_real_database"}
-    subprocess_env.pop("DATABASE_URL", None)
+    # Point DATABASE_URL at a database that does not exist so connect_db
+    # fails with "Could not connect to the database"; keeping it set ensures
+    # database_url_from_env() uses it in CI where DB_* vars may not be set.
+    subprocess_env = {
+        **os.environ,
+        "DATABASE_URL": "postgresql://nobody:nopass@localhost:5432/definitely_not_a_real_database",
+    }
     result = subprocess.run(
         [sys.executable, "-m", "database.load_data", str(data_file)],
         env=subprocess_env,
@@ -251,6 +253,7 @@ def cli_data_file(tmp_path, monkeypatch):
 
 @pytest.mark.db
 def test_main_exits_nonzero_when_database_config_missing(cli_data_file, monkeypatch, capsys):
+    monkeypatch.delenv("DATABASE_URL", raising=False)
     monkeypatch.delenv("DB_HOST", raising=False)
 
     with pytest.raises(SystemExit) as exit_info:

@@ -74,6 +74,7 @@ def test_analysis(client, monkeypatch):
 def test_analysis_page_returns_500_when_credentials_missing(client, monkeypatch):
     """GET /analysis should fail clearly, not crash, when a DB_*
     variable isn't set - it must never reach get_session() at all."""
+    monkeypatch.delenv("DATABASE_URL", raising=False)
     monkeypatch.delenv("DB_NAME", raising=False)
 
     response = client.get("/analysis")

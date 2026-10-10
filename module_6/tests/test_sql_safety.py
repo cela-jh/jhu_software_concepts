@@ -313,6 +313,7 @@ def test_endpoint_rejects_invalid_school_with_400(client, payload):
 
 @pytest.mark.web
 def test_endpoint_reports_missing_database_config(client, monkeypatch):
+    monkeypatch.delenv("DATABASE_URL", raising=False)
     monkeypatch.delenv("DB_PORT", raising=False)
 
     response = client.get(ENDPOINT)

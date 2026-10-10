@@ -22,6 +22,10 @@ DB_VARS = {
 
 @pytest.fixture
 def db_env(monkeypatch):
+    # Clear DATABASE_URL so database_url_from_env() uses the DB_* fallback
+    # path; in CI, DATABASE_URL is set in the job env and would short-circuit
+    # every test that exercises the DB_* vars if left in place.
+    monkeypatch.delenv("DATABASE_URL", raising=False)
     for name, value in DB_VARS.items():
         monkeypatch.setenv(name, value)
 

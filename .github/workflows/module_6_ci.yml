@@ -1,0 +1,113 @@
+name: Module 6 CI
+
+on:
+  push:
+    paths:
+      - 'module_6/**'
+  pull_request:
+    paths:
+      - 'module_6/**'
+
+jobs:
+  pylint:
+    name: Pylint
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install dependencies
+        working-directory: module_6
+        run: |
+          pip install -r src/web/requirements.txt
+          pip install -r src/worker/requirements.txt
+          pip install -e ".[dev]"
+      - name: Run Pylint
+        working-directory: module_6
+        run: pylint src/web/ src/worker/ --ignore=venv --rcfile=.pylintrc --fail-under=10
+
+  pytest:
+    name: Pytest
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: cam_db_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install dependencies
+        working-directory: module_6
+        run: |
+          pip install -r src/web/requirements.txt
+          pip install -r src/worker/requirements.txt
+          pip install -e ".[dev]"
+      - name: Load schema into cam_db_test
+        env:
+          PGPASSWORD: postgres
+        run: psql -h localhost -U postgres -d cam_db_test -f module_6/src/db/init.sql
+      - name: Run Pytest
+        working-directory: module_6
+        env:
+          DATABASE_URL: postgresql://postgres:postgres@localhost:5432/cam_db_test
+        run: pytest tests/
+
+  snyk:
+    name: Snyk dependency scan
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install packages
+        working-directory: module_6
+        run: |
+          pip install -r src/web/requirements.txt
+          pip install -r src/worker/requirements.txt
+      - name: Install Snyk CLI
+        run: npm install -g snyk
+      - name: Scan web service dependencies
+        working-directory: module_6/src/web
+        env:
+          SNYK_TOKEN: ${{ secrets.SNYK_TOKEN }}
+        run: snyk test --file=requirements.txt --skip-unresolved
+      - name: Scan worker service dependencies
+        working-directory: module_6/src/worker
+        env:
+          SNYK_TOKEN: ${{ secrets.SNYK_TOKEN }}
+        run: snyk test --file=requirements.txt --skip-unresolved
+
+  pydeps:
+    name: Dependency graph
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install Graphviz
+        run: sudo apt-get install -y graphviz
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install dependencies
+        working-directory: module_6
+        run: |
+          pip install -r src/web/requirements.txt
+          pip install -e ".[dev]"
+      - name: Generate dependency graph
+        working-directory: module_6
+        run: pydeps src/web --max-bacon 3 --max-module-depth 2 --no-show -o /tmp/dependency.svg
+      - name: Verify graph was generated
+        run: test -f /tmp/dependency.svg

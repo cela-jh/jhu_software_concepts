@@ -221,12 +221,14 @@ def test_cli_exits_nonzero_when_database_unreachable(tmp_path):
     data_file = tmp_path / "applicant_data.json"
     data_file.write_text(json.dumps([fake_applicant_row(9999999)]))
 
+    # Remove DATABASE_URL so database_url_from_env() falls back to DB_*
+    # vars; leaving it set would cause the subprocess to connect to the
+    # test database instead of the unreachable one.
+    subprocess_env = {**os.environ, "DB_NAME": "definitely_not_a_real_database"}
+    subprocess_env.pop("DATABASE_URL", None)
     result = subprocess.run(
         [sys.executable, "-m", "database.load_data", str(data_file)],
-        env={
-            **os.environ,
-            "DB_NAME": "definitely_not_a_real_database",
-        },
+        env=subprocess_env,
         cwd=SRC_DIR, capture_output=True, text=True, check=False,
     )
 

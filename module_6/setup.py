@@ -42,7 +42,6 @@ setup(
             "Sphinx>=9.1,<10",
             "sphinx_rtd_theme>=3.1,<4",
             "beautifulsoup4>=4.15,<5",
-            "pydeps>=12.0,<13",
         ],
     },
 )
